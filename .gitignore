@@ -1,0 +1,29 @@
+# Patient data must never be committed (PhysioNet data use agreement)
+data/
+*.npy
+*.npz
+*.csv
+!results/**/*.csv
+
+# Third-party code, model weights, and run outputs
+external/
+checkpoints/
+*.pt
+*.pt2
+*.pth
+*.onnx
+*.engine
+wandb/
+runs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# Local secrets and OS files
+.env
+.DS_Store
