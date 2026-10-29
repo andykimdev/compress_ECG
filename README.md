@@ -72,6 +72,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Download the EchoNext-Mini code and the pretrained teacher weights (about 1.5 GB). The script
+pins each source to a fixed version and checks every file against its SHA-256 hash.
+
+```bash
+bash scripts/download_weights.sh
+```
+
 ## Repository layout
 
 | Folder | Contents |
