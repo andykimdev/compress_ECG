@@ -70,7 +70,7 @@ The loader follows [PhysioNet version 1.1.1](https://physionet.org/content/echon
 Point `ECHONEXT_DIR` or `data_dir` at this directory (a nested Kaggle folder is fine):
 
 ```text
-EchoNext_metadata_100k.csv
+echonext_metadata_100k.csv               # either capitalization is accepted
 EchoNext_train_waveforms.npy
 EchoNext_train_tabular_features.npy
 EchoNext_val_waveforms.npy
@@ -134,8 +134,9 @@ alignment and auditing, never model inputs. The dataset uses read-only NumPy
 memory maps and copies one sample at a time. It reopens maps in spawned/forked
 workers instead of copying the training waveform array into RAM.
 
-The seven supplied tabular columns are ordered: `sex`, `ventricular_rate`,
-`atrial_rate`, `pr_interval`, `qrs_duration`, `qt_corrected`, `age_at_ecg`.
+The seven supplied tabular columns are ordered: `sex`, `age_at_ecg`,
+`ventricular_rate`, `atrial_rate`, `pr_interval`, `qrs_duration`, `qt_corrected`.
+This differs from the PhysioNet README, which lists age last.
 Use this array directly. The metadata's raw values have different preprocessing.
 Echo measurements and echo-derived flags are targets/audit information only.
 
@@ -154,7 +155,7 @@ The following files go to the private run directory (default `runs/`, git-ignore
 
 | File | Contents |
 |---|---|
-| `predictions.npz` | Probabilities, labels, label mask, row IDs, split rows, patient keys, and label names |
+| `predictions.npz` | Logits, probabilities, labels, label mask, row IDs, split rows, patient keys, and label names |
 | `metadata.csv` | Aligned IDs, split, and available race/ethnicity, sex, age, and care-setting fields |
 | `manifest.json` | Code commit/dirty flag, model/source hashes, data version/path, metadata hash, sampling settings, array shapes/sizes, and runtime versions |
 | `metrics.json` | Per-output observed/positive counts, AUROC, and Brier score |

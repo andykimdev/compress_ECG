@@ -6,7 +6,10 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from compress_ecg.data import EchoNextDataset, LABEL_COLUMNS, read_metadata
+from compress_ecg import data as data_module
+from compress_ecg.data import (
+    DEFAULT_DATA_DIR, EchoNextDataset, LABEL_COLUMNS, TABULAR_COLUMNS, read_metadata, resolve_data_dir,
+)
 
 
 def edit_meta(root, edit):
@@ -125,3 +128,34 @@ def test_nonfinite_inputs_rejected(data_dir):
 def test_environment_path(data_dir, monkeypatch):
     monkeypatch.setenv("ECHONEXT_DIR", str(data_dir))
     assert len(EchoNextDataset(split="val")) == 6
+
+
+def test_lowercase_metadata_filename_from_physionet_is_found(data_dir):
+    # A case-sensitive disk, such as Linux, needs the name exactly as PhysioNet ships it.
+    (data_dir / "EchoNext_metadata_100k.csv").rename(data_dir / "echonext_metadata_100k.csv")
+    assert (data_dir / "echonext_metadata_100k.csv").is_file()
+    assert len(read_metadata(data_dir)) == 24
+
+
+def test_default_folder_is_used_when_nothing_is_set(data_dir, monkeypatch):
+    monkeypatch.delenv("ECHONEXT_DIR", raising=False)
+    monkeypatch.setattr(data_module, "DEFAULT_DATA_DIR", data_dir)
+    assert resolve_data_dir() == data_dir.resolve()
+
+
+def test_missing_data_folder_names_the_fix(tmp_path, monkeypatch):
+    monkeypatch.delenv("ECHONEXT_DIR", raising=False)
+    monkeypatch.setattr(data_module, "DEFAULT_DATA_DIR", tmp_path)
+    with pytest.raises(FileNotFoundError, match="ECHONEXT_DIR"):
+        resolve_data_dir()
+
+
+def test_tabular_column_names_match_the_real_array():
+    if not (DEFAULT_DATA_DIR / "EchoNext_val_tabular_features.npy").is_file():
+        pytest.skip("Real EchoNext files are not on this machine")
+    meta = read_metadata(DEFAULT_DATA_DIR).query("split == 'val'").reset_index(drop=True)
+    array = np.load(DEFAULT_DATA_DIR / "EchoNext_val_tabular_features.npy")
+    for index, name in enumerate(TABULAR_COLUMNS):
+        raw = meta[name].eq("male").astype(float) if name == "sex" else meta[name]
+        correlation = pd.Series(array[:, index]).corr(raw, method="spearman")
+        assert correlation > .99, f"Array column {index} is not {name}: {correlation:.3f}"

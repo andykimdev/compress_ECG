@@ -15,6 +15,7 @@ import torch
 from torch.utils.data import Dataset
 
 SPLITS = ("train", "val", "test", "no_split")
+DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "echonext" / "1.1.1"
 LABEL_COLUMNS = (
     "lvef_lte_45_flag",
     "lvwt_gte_13_flag",
@@ -30,28 +31,37 @@ LABEL_COLUMNS = (
     "shd_moderate_or_greater_flag",
 )
 SHD_INDEX = LABEL_COLUMNS.index("shd_moderate_or_greater_flag")
+# Order inside the .npy arrays. The dataset README lists age last, but the arrays hold it second.
 TABULAR_COLUMNS = (
-    "sex", "ventricular_rate", "atrial_rate", "pr_interval",
-    "qrs_duration", "qt_corrected", "age_at_ecg",
+    "sex", "age_at_ecg", "ventricular_rate", "atrial_rate", "pr_interval",
+    "qrs_duration", "qt_corrected",
 )
+# PhysioNet ships the lowercase name, while its README uses the other. Linux disks treat them apart.
+METADATA_FILENAMES = ("echonext_metadata_100k.csv", "EchoNext_metadata_100k.csv")
 AUDIT_COLUMNS = ("race_ethnicity", "sex", "age_at_ecg", "location_setting")
 
 
+def find_metadata_file(root: Path) -> Path | None:
+    """Return the metadata CSV in a folder, under either name, or None."""
+    for name in METADATA_FILENAMES:
+        if (root / name).is_file():
+            return root / name
+    return None
+
+
 def resolve_data_dir(data_dir: str | Path | None = None) -> Path:
-    """Accept the actual dataset root (also under /kaggle/input), or ECHONEXT_DIR."""
-    value = data_dir if data_dir is not None else os.environ.get("ECHONEXT_DIR")
-    if not value:
-        raise ValueError("Set ECHONEXT_DIR or pass data_dir containing EchoNext_metadata_100k.csv")
+    """Use data_dir, then ECHONEXT_DIR, then the repository's data folder."""
+    value = data_dir if data_dir is not None else os.environ.get("ECHONEXT_DIR", DEFAULT_DATA_DIR)
     root = Path(value).expanduser().resolve()
-    if not (root / "EchoNext_metadata_100k.csv").is_file():
-        raise FileNotFoundError(f"EchoNext_metadata_100k.csv not found in {root}")
+    if find_metadata_file(root) is None:
+        raise FileNotFoundError(f"No EchoNext metadata CSV in {root}. Set ECHONEXT_DIR or pass data_dir")
     return root
 
 
 def read_metadata(data_dir: str | Path | None = None) -> pd.DataFrame:
     """Check official split integrity; retain the CSV's zero-based positional row ID."""
     root = resolve_data_dir(data_dir)
-    meta = pd.read_csv(root / "EchoNext_metadata_100k.csv", dtype={"patient_key": "string"})
+    meta = pd.read_csv(find_metadata_file(root), dtype={"patient_key": "string"})
     required = {"patient_key", "split", *LABEL_COLUMNS}
     missing = required.difference(meta.columns)
     if missing:
