@@ -15,6 +15,7 @@ checkpoints/
 *.engine
 wandb/
 runs/
+results/dummy_audit/
 
 # Python
 __pycache__/

@@ -146,10 +146,64 @@ it, shown as a percentage. A score of 50 is a coin flip, and 100 is a perfect ra
 AUROC does not show whether a predicted 30% risk really means 30%. That is why we also report
 calibration error and the Brier score, which is the average squared error of the probabilities.
 
+## Code map
+
+Each role fills in one file. Functions that are not written yet raise `NotImplementedError` with
+a note on what to do, and their docstrings give the exact inputs and outputs.
+
+| Role | File to fill in | Command | Passes on |
+|---|---|---|---|
+| A: Data and baselines | `baseline.py`, `profiling.py` | `run_baseline.py`, `run_profile.py` | Baseline runs, profiling table |
+| B: Teacher | `teacher.py` | `run_teacher.py` | Teacher checkpoint and runs |
+| C: Student | `distill.py` | `run_student.py` | Student checkpoint and runs |
+| D: Quantization | `quantize.py` | `run_quantize.py` | FP16 and INT8 models and runs |
+| E: Audit | `audit.py` | `run_audit.py` | Aggregate tables and figures |
+
+Files are in `src/compress_ecg/`, and commands are in `scripts/`. Three files are shared and
+already work, so change them only after telling the team.
+
+- **`data.py`:** Loads the ECGs. Each batch has `waveform`, `tabular`, `labels`, and `label_mask`.
+- **`predictions.py`:** Runs any model and saves or loads its prediction files.
+- **`student.py`:** Builds, saves, and loads the width 5 Student.
+
+### The two shared formats
+
+Every neural model is called the same way, so any role's code works with any model.
+
+```python
+logits = model(waveform, tabular)
+# waveform: float32 [batch, 12, 2500]
+# tabular:  float32 [batch, 7]
+# logits:   [batch, 12], with overall SHD last
+```
+
+Every model saves the same four files with `predictions.write_run`, under
+`runs/<model>/<split>/`. These hold patient-level values, so they never go in git.
+
+| File | Contents |
+|---|---|
+| `predictions.npz` | Logits, probabilities, labels, label mask, row IDs, patient keys |
+| `metadata.csv` | Row IDs, race and ethnicity, sex, age, care setting |
+| `manifest.json` | Code version, data hash, settings |
+| `metrics.json` | Basic AUROC and Brier score for a quick check |
+
+### Working before the real models exist
+
+Until a real input is ready, use the released EchoNext-Mini as a dummy, and keep its outputs under
+`runs/dummy/`. Dummy numbers only show that code works, so they never go in the report.
+
+- **Role C:** Train from EchoNext-Mini's saved predictions on the Training ECGs.
+- **Role D:** Run `run_quantize.py` without `--student`, which converts EchoNext-Mini.
+- **Role E:** Build the scorecard on EchoNext-Mini's saved predictions.
+
+`tests/test_pipeline.py` runs every handoff on synthetic ECGs. When your code is ready, replace
+your role's stand-in in that test with the real call.
+
 ## Current status
 
 - **Done:** We downloaded the data, checked its hashes, and
   [summarized it](results/data_stats). The summary checks found no cleaning step we need.
+- **Done:** The shared code framework is in place, with one file for each role to fill in.
 - **Next:** Run EchoNext-Mini on the Test ECGs and see whether we get close to 82.0, which also
   tests our data loading and evaluation code. Then add the gradient boosting baseline.
 - **After that:** Start step 2, the Teacher.

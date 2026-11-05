@@ -9,6 +9,7 @@ import torch
 from torch import nn
 
 import compress_ecg.baseline as baseline
+from compress_ecg import predictions
 from compress_ecg.data import EchoNextDataset, LABEL_COLUMNS
 
 
@@ -19,7 +20,7 @@ class KnownLogits(nn.Module):
 
 def test_predictions_apply_sigmoid_once_and_preserve_order(data_dir):
     dataset = EchoNextDataset(data_dir, "val", limit=5, seed=4)
-    result = baseline.predict_mini(KnownLogits(), dataset, batch_size=2)
+    result = predictions.predict(KnownLogits(), dataset, batch_size=2)
     np.testing.assert_array_equal(result["probabilities"], np.full((5, 12), .5))
     np.testing.assert_array_equal(result["row_id"], dataset.selected_metadata.row_id)
     np.testing.assert_array_equal(result["split_row"], dataset.indices)
@@ -33,14 +34,14 @@ def test_metrics_ignore_unobserved_and_handle_single_class():
         "probabilities": np.tile([.1, .9, .8], (12, 1)).T,
         "label_mask": np.tile([True, True, False], (12, 1)).T,
     }
-    scores = baseline.baseline_metrics(result)
+    scores = predictions.basic_metrics(result)
     assert scores[LABEL_COLUMNS[0]]["n_observed"] == 2
     assert scores[LABEL_COLUMNS[0]]["auroc"] == 1.0
     assert scores[LABEL_COLUMNS[0]]["brier"] == pytest.approx(.01)
     result["labels"][1] = 0
-    assert baseline.baseline_metrics(result)[LABEL_COLUMNS[0]]["auroc"] is None
+    assert predictions.basic_metrics(result)[LABEL_COLUMNS[0]]["auroc"] is None
     result["label_mask"][:] = False
-    assert baseline.baseline_metrics(result)[LABEL_COLUMNS[0]]["brier"] is None
+    assert predictions.basic_metrics(result)[LABEL_COLUMNS[0]]["brier"] is None
 
 
 def test_run_saves_private_evaluation_contract(data_dir, tmp_path, monkeypatch):
@@ -81,8 +82,8 @@ def released_model():
 
 def test_released_checkpoint_matches_upstream_and_is_batch_independent(data_dir, released_model):
     dataset = EchoNextDataset(data_dir, "val", limit=3)
-    a = baseline.predict_mini(released_model, dataset, batch_size=1)
-    b = baseline.predict_mini(released_model, dataset, batch_size=2)
+    a = predictions.predict(released_model, dataset, batch_size=1)
+    b = predictions.predict(released_model, dataset, batch_size=2)
     np.testing.assert_allclose(a["probabilities"], b["probabilities"], rtol=1e-5, atol=1e-6)
     spec = importlib.util.spec_from_file_location(
         "_upstream_reference", baseline.DEFAULT_MINI_DIR / "cradlenet/models/resnet1d_tabular.py",
