@@ -1,0 +1,5 @@
+split,ecgs,pct,with_disease
+train,6457,8.9,0
+val,514,11.1,0
+test,615,11.3,0
+no_split,1358,7.8,0
