@@ -210,10 +210,12 @@ These rules come from the data use agreement.
 
 ## Setup
 
+Use Python 3.10 or later.
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e '.[dev]'
 ```
 
 Download the EchoNext-Mini code and the pretrained weights (about 1.5 GB). The script pins each
@@ -221,6 +223,16 @@ source to a fixed version and checks every file against its SHA-256 hash.
 
 ```bash
 bash scripts/download_weights.sh
+```
+
+To work on data loading or the EchoNext-Mini baseline only, a smaller download is enough. The
+[data and baseline guide](docs/data_and_baseline.md) covers input shapes and run files.
+
+```bash
+bash scripts/download_weights.sh --mini-only
+export ECHONEXT_DIR=/path/to/official/files
+python scripts/run_baseline.py --config configs/mini_baseline.json
+pytest -q
 ```
 
 ## Repository layout
