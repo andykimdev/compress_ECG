@@ -54,12 +54,15 @@ with 11 echo-confirmed labels, a composite SHD label, demographics, and official
 1. Create a PhysioNet account.
 2. Sign the data use agreement on the
    [EchoNext page](https://physionet.org/content/echonext/).
-3. Download the files to a folder on your own machine or server.
-4. Set the environment variable `ECHONEXT_DIR` to that folder.
+3. Attach the team's private Kaggle copy, shared for this project with the creators'
+   permission, or download the files to your own machine/server.
+4. Set `ECHONEXT_DIR` to the folder containing `EchoNext_metadata_100k.csv`, or pass
+   that directory directly to the loader.
 
 Follow these rules from the data use agreement.
 
-- **Sign individually:** Every team member signs the agreement. Never share files or logins.
+- **Sign individually:** Every team member signs the agreement. Keep the approved
+  centralized project copy private and never share logins.
 - **Keep data out of git:** Never commit waveforms, labels, or per-patient predictions.
 - **Keep data off hosted devices:** Profile on Qualcomm AI Hub phones with random or
   synthetic inputs only. Compute AUROC on our own machines.
@@ -67,9 +70,9 @@ Follow these rules from the data use agreement.
 ## Setup
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv  # Python 3.10 or later
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e '.[dev]'
 ```
 
 Download the EchoNext-Mini code and the pretrained teacher weights (about 1.5 GB). The script
@@ -78,6 +81,22 @@ pins each source to a fixed version and checks every file against its SHA-256 ha
 ```bash
 bash scripts/download_weights.sh
 ```
+
+For A's data-loader and released baseline work, download only Mini:
+
+```bash
+bash scripts/download_weights.sh --mini-only
+export ECHONEXT_DIR=/path/to/official/files
+python scripts/run_baseline.py --config configs/mini_baseline.json
+pytest -q
+```
+
+This runs Mini on a seeded sample of up to 1,000 official validation ECGs and saves
+aligned predictions, audit metadata, metrics, and a run manifest under `runs/`.
+Use a fresh output directory for each run. For Kaggle, open
+[`notebooks/01_data_and_baseline.ipynb`](notebooks/01_data_and_baseline.ipynb).
+The [data and baseline guide](docs/data_and_baseline.md) documents setup, input
+shapes, split safeguards, missing-label masks, and the B/C/E handoff.
 
 ## Repository layout
 

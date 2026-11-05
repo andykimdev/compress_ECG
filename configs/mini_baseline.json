@@ -1,0 +1,10 @@
+{
+  "split": "val",
+  "limit": 1000,
+  "seed": 42,
+  "batch_size": 64,
+  "num_workers": 0,
+  "device": "cpu",
+  "output_dir": "runs/mini_val_1000_seed42",
+  "data_version": "1.1.1"
+}

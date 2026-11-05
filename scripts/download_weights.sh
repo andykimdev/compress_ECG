@@ -12,6 +12,14 @@
 
 set -euo pipefail
 
+MINI_ONLY=false
+if [[ ${1:-} == --mini-only && $# -eq 1 ]]; then
+    MINI_ONLY=true
+elif [[ $# -ne 0 ]]; then
+    echo "Usage: bash scripts/download_weights.sh [--mini-only]" >&2
+    exit 2
+fi
+
 INTROECG_COMMIT=15233e9392e9dc10c136a5624abf10199207bce9
 ECG_FM_REV=584219ea492cdeef2e19ffbdf9c6ecc874ba427e
 ECGFOUNDER_REV=d9b1793951b2342f5f7e84f1ac03cd37f8a08724
@@ -55,13 +63,20 @@ fetch() {
     echo "ok  $path"
 }
 
-if [[ ! -d external/IntroECG/.git ]]; then
-    git clone https://github.com/PierreElias/IntroECG.git external/IntroECG
+# Only the plain torch architecture is required, avoiding the tutorial's legacy
+# Lightning dependencies. Both modes use these same two hash-verified files.
+MINI_ROOT="external/IntroECG/7-EchoNext Minimodel"
+MINI_URL="https://raw.githubusercontent.com/PierreElias/IntroECG/$INTROECG_COMMIT/7-EchoNext%20Minimodel"
+fetch "$MINI_URL/cradlenet/models/resnet1d_tabular.py" \
+    "$MINI_ROOT/cradlenet/models/resnet1d_tabular.py" \
+    6539e16953f231fe964957464d49d11fec529fc95dbaf845a2721e69e9328d39
+fetch "$MINI_URL/models/echonext_multilabel_minimodel/weights.pt" \
+    "$MINI_WEIGHTS" \
+    aac57aad0ec9763021c6264e89c74e3d78f8b711159b1880e5bd4515d5e21cd6
+if [[ "$MINI_ONLY" == true ]]; then
+    echo "EchoNext-Mini is ready."
+    exit 0
 fi
-git -C external/IntroECG fetch --quiet origin
-git -C external/IntroECG checkout --quiet "$INTROECG_COMMIT"
-verify "$MINI_WEIGHTS" aac57aad0ec9763021c6264e89c74e3d78f8b711159b1880e5bd4515d5e21cd6
-echo "ok  $MINI_WEIGHTS"
 
 fetch "$HF/wanglab/ecg-fm/resolve/$ECG_FM_REV/mimic_iv_ecg_physionet_pretrained.yaml" \
     "$ECG_FM_DIR/mimic_iv_ecg_physionet_pretrained.yaml" \
