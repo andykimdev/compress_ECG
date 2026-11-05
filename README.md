@@ -23,7 +23,7 @@ a stage works.
 
 1. Get data access and reproduce the EchoNext-Mini baseline.
 2. Fine-tune the ECG-FM teacher (about 90M parameters) and confirm it beats the baseline.
-3. Distill one student of about 0.3M parameters, roughly 3.5 times smaller than EchoNext-Mini.
+3. Distill one student of about 0.1M parameters, roughly 3.5 times smaller than EchoNext-Mini.
 4. Run a short quantization comparison (FP32, FP16, INT8) on one deployment target.
 5. Measure latency and memory, and audit AUROC, calibration, and worst-group performance.
 
