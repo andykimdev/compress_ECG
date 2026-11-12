@@ -11,6 +11,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from compress_ecg.baseline import run_gradient_boosting
 from compress_ecg.data import EchoNextDataset, LABEL_COLUMNS, SHD_INDEX
 from compress_ecg.predictions import aligned_logits, basic_metrics, load_run, run_dir, write_run
 
@@ -47,8 +48,9 @@ def test_handoffs_connect_from_teacher_to_scorecard(data_dir, tmp_path):
     test = EchoNextDataset(data_dir, "test")
 
     # Role A: baseline predictions.
-    write_run(TinyModel(), "mini", val, runs_root=tmp_path)
-    write_run(TinyModel(), "mini", test, runs_root=tmp_path)
+    for dataset in (val, test):
+        destination = run_dir("gradient_boosting", dataset.split, tmp_path)
+        run_gradient_boosting(data_dir, destination, split=dataset.split)
 
     # Role B: frozen Teacher predictions.
     teacher = TinyModel()
@@ -73,7 +75,7 @@ def test_handoffs_connect_from_teacher_to_scorecard(data_dir, tmp_path):
 
     # Role E: everything is read back from files alone.
     expected = {
-        "mini", "teacher", "student", "student_fp16", "student_int8_post", "student_int8_qat",
+        "gradient_boosting", "teacher", "student", "student_fp16", "student_int8_post", "student_int8_qat",
     }
     assert {path.parent.name for path in tmp_path.glob("*/test")} == expected
     scorecard = {}

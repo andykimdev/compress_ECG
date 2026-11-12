@@ -13,6 +13,7 @@ checkpoints/
 *.pth
 *.onnx
 *.engine
+*.joblib
 wandb/
 runs/
 results/dummy_audit/
