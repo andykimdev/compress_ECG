@@ -289,6 +289,19 @@ python scripts/run_baseline.py --config configs/mini_baseline.json
 pytest -q
 ```
 
+### Teacher setup
+
+Only Role B needs this. Loading ECG-FM needs fairseq-signals, which works with Python 3.10 and a
+`transformers` version below 4.50. Keep it in its own environment, outside the repository.
+
+```bash
+python3.10 -m venv ~/venvs/compress-ecg-teacher
+source ~/venvs/compress-ecg-teacher/bin/activate
+pip install "torch>=2.6" "transformers>=4.19,<4.50" -e '.[dev]' \
+  "fairseq-signals @ git+https://github.com/Jwoo5/fairseq-signals@f8f0ff1c788a82c2059cb452cd5462898867489e"
+pytest -q tests/test_teacher.py
+```
+
 ## Repository layout
 
 | Folder | Contents |
