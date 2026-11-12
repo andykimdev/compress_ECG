@@ -13,9 +13,11 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch import nn
+import time
 
 from .data import EchoNextDataset
-from .predictions import fresh_run_dir, predict, run_manifest, save_run, sha256_file
+from .predictions import fresh_run_dir, predict, run_manifest, save_run, sha256_file, basic_metrics
+from .audit import measure_model_size
 
 INTROECG_COMMIT = "15233e9392e9dc10c136a5624abf10199207bce9"
 MINI_WEIGHTS_SHA256 = "aac57aad0ec9763021c6264e89c74e3d78f8b711159b1880e5bd4515d5e21cd6"
@@ -94,15 +96,19 @@ def run_baseline(
     dataset = EchoNextDataset(data_dir, split, limit=limit, seed=seed)
     destination = fresh_run_dir(output_dir, dataset.root)
     model = load_mini(mini_dir, device=device)
+    start = time.perf_counter()
     outputs = predict(model, dataset, batch_size=batch_size, num_workers=num_workers, device=device)
+    predict_time = time.perf_counter() - start
+    model_size_bytes = measure_model_size(model)
     manifest = run_manifest(
         "EchoNext-Mini", dataset, data_version=data_version,
         introecg_commit=INTROECG_COMMIT, weights_sha256=MINI_WEIGHTS_SHA256,
         source_sha256=MINI_SOURCE_SHA256, requested_limit=limit, seed=seed,
         batch_size=batch_size, num_workers=num_workers, device=device,
     )
+
     metrics = save_run(destination, outputs, dataset.selected_metadata, manifest)
-    return {"output_dir": str(destination), "n_records": len(dataset), "metrics": metrics}
+    return {"output_dir": str(destination), "n_records": len(dataset), "metrics": metrics, "predict_time": f"{predict_time:.2f}s", "model_size_bytes": f"{model_size_bytes} bytes"}
 
 
 def fit_gradient_boosting(train: EchoNextDataset, *, seed: int = 42) -> object:

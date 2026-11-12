@@ -25,7 +25,8 @@ from sklearn.metrics import brier_score_loss, roc_auc_score
 from torch import nn
 from torch.utils.data import DataLoader
 
-from .data import AUDIT_COLUMNS, LABEL_COLUMNS, EchoNextDataset, find_metadata_file
+
+from .data import AUDIT_COLUMNS, LABEL_COLUMNS, EchoNextDataset, SHD_INDEX, find_metadata_file
 
 # Each name owns one folder under runs/, so the audit can find every model.
 MODEL_NAMES = (
@@ -323,6 +324,24 @@ def load_run(path: str | Path) -> PredictionRun:
     )
 
 
+def load_predictions_and_metadata(output_dir: str | Path) -> tuple[dict[str, np.ndarray], pd.DataFrame]:
+    """
+    Load the saved predictions and metadata for a run folder.
+
+    Args:
+        output_dir: Directory produced by save_run or write_run.
+
+    Returns:
+        A pair of (arrays, metadata) where arrays holds the .npz payload and metadata is
+        the CSV from metadata.csv.
+
+    Raises:
+        ValueError: When the saved files are missing or inconsistent.
+    """
+    run = load_run(output_dir)
+    return run.arrays, run.metadata
+
+
 def aligned_logits(run: PredictionRun, row_ids: np.ndarray | torch.Tensor) -> torch.Tensor:
     """
     Look up saved logits for a batch, which may be shuffled.
@@ -344,3 +363,5 @@ def aligned_logits(run: PredictionRun, row_ids: np.ndarray | torch.Tensor) -> to
     if not np.array_equal(sorted_ids[positions], wanted):
         raise ValueError("The saved run has no prediction for at least one row in this batch")
     return torch.from_numpy(run.arrays["logits"][order[positions]])
+
+
