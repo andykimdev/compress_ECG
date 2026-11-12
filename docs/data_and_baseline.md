@@ -11,7 +11,7 @@ the aligned prediction files. Profiling uses synthetic inputs and runs independe
    clones this branch in its first cell. Set `CODE_COMMIT` to the pushed SHA for exact repeats.
 2. Upload/open `notebooks/01_data_and_baseline.ipynb` in a **private** Kaggle notebook.
    Attach the existing private EchoNext dataset. Keep the original filenames and order.
-3. Enable Internet for the code, dependencies, and Mini weights. GitHub requires a token
+3. Enable Internet for the code and Mini weights. GitHub requires a token
    that can read the private `andykimdev/compress_ECG` repository. In Kaggle **Add-ons → Secrets**,
    add it as `GITHUB_TOKEN` and grant the notebook access. A fine-grained token needs
    **Contents: Read-only** for this repository. If your collaborator account cannot select
@@ -28,7 +28,10 @@ the aligned prediction files. Profiling uses synthetic inputs and runs independe
 6. Keep the completed private version and its `runs/` output. Download the aggregate files
    under `results/baselines/` and place them in the repository's `results/baselines/`.
 
-The notebook calls the shared Python package. When updating notebook cells in Kaggle,
+The notebook imports the shared Python package directly from the checkout and uses Kaggle's
+preinstalled dependencies. If a previous run installed dependencies and PyTorch now fails to
+import, stop that Kaggle session and start a fresh one before rerunning the updated setup cell.
+When updating notebook cells in Kaggle,
 clear outputs before committing the `.ipynb` to GitHub. On an interactive repeat, use a
 fresh `RUNS_ROOT` if the destination already holds a completed run.
 
