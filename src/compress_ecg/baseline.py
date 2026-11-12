@@ -95,6 +95,7 @@ def run_baseline(
     dataset = EchoNextDataset(data_dir, split, limit=limit, seed=seed)
     destination = fresh_run_dir(output_dir, dataset.root)
     model = load_mini(mini_dir, device=device)
+    import ipdb; ipdb.set_trace()
     outputs = predict(model, dataset, batch_size=batch_size, num_workers=num_workers, device=device)
     manifest = run_manifest(
         "EchoNext-Mini", dataset, data_version=data_version,
