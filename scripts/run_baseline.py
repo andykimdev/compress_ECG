@@ -37,7 +37,7 @@ def main():
         args["limit"] = None
     result = run_baseline(**args)
     print(json.dumps({"output_dir": result["output_dir"], "n_records": result["n_records"],
-                      "shd": result["metrics"][LABEL_COLUMNS[SHD_INDEX]]}, indent=2))
+                      "shd": result["metrics"][LABEL_COLUMNS[SHD_INDEX]], "predict_time": result["predict_time"], "model_size_bytes": result["model_size_bytes"]}, indent=2))
 
 
 if __name__ == "__main__":

@@ -5,6 +5,6 @@
   "batch_size": 64,
   "num_workers": 0,
   "device": "cpu",
-  "output_dir": "runs/mini_val_1000_seed44",
+  "output_dir": "runs/mini_val_1000_seed45",
   "data_version": "1.1.1"
 }
