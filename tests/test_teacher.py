@@ -1,0 +1,122 @@
+from pathlib import Path
+
+import numpy as np
+import pytest
+import torch
+from scipy.interpolate import interp1d
+
+from compress_ecg.data import SHD_INDEX, EchoNextDataset
+from compress_ecg.profiling import synthetic_inputs
+from compress_ecg.teacher import (
+    Teacher, build_teacher, extract_features, fit_probe, masked_bce, to_ecg_fm_input,
+)
+
+ECG_FM_CHECKPOINT = (
+    Path(__file__).resolve().parents[1] / "checkpoints/pretrained/ecg_fm/mimic_iv_ecg_physionet_pretrained.pt"
+)
+
+
+class FakeEncoder(torch.nn.Module):
+    """Stands in for ECG-FM: returns 3 time steps of 768 numbers per window."""
+
+    def __init__(self):
+        super().__init__()
+        self.windows = None
+
+    def extract_features(self, source, padding_mask, mask):
+        self.windows = source
+        steps = source.mean(dim=(1, 2))[:, None, None].expand(-1, 3, 768)
+        return {"x": steps}
+
+
+def reference_windows(ecg: np.ndarray) -> np.ndarray:
+    """Rebuild one ECG's windows with scipy, the way fairseq-signals preprocess.py does."""
+    readings = ecg.shape[-1] * 2
+    upsampled = interp1d(np.linspace(0, readings - 1, ecg.shape[-1]), ecg, kind="linear")(np.arange(readings))
+    scaled = (upsampled - upsampled.mean(-1, keepdims=True)) / upsampled.std(-1, keepdims=True)
+    return np.stack([scaled[:, :2500], scaled[:, 2500:]])
+
+
+def test_windows_match_the_ecg_fm_preprocessing():
+    ecgs = np.random.default_rng(0).standard_normal((2, 12, 2500))
+    windows = to_ecg_fm_input(torch.tensor(ecgs)).numpy()
+    expected = np.concatenate([reference_windows(ecg) for ecg in ecgs])
+    np.testing.assert_allclose(windows, expected, atol=1e-10)
+
+
+def test_flat_lead_becomes_zero():
+    ecg = torch.randn(1, 12, 2500, dtype=torch.float64)
+    ecg[0, 3] = 0.7
+    windows = to_ecg_fm_input(ecg)
+    assert windows.shape == (2, 12, 2500)
+    assert torch.equal(windows[:, 3], torch.zeros(2, 2500, dtype=torch.float64))
+    assert torch.isfinite(windows).all()
+
+
+def test_teacher_follows_the_call_format_and_ignores_tabular():
+    teacher = Teacher(FakeEncoder()).eval()
+    waveform, tabular = synthetic_inputs(3)
+    logits = teacher(waveform, tabular)
+    assert logits.shape == (3, 12)
+    assert teacher.encoder.windows.shape == (6, 12, 2500)
+    torch.testing.assert_close(teacher(waveform, torch.randn_like(tabular)), logits)
+
+
+@pytest.mark.parametrize("shape", [(2, 12, 1250), (2, 11, 2500), (12, 2500)])
+def test_teacher_rejects_wrong_waveform_shape(shape):
+    with pytest.raises(ValueError, match="waveform"):
+        Teacher(FakeEncoder())(torch.zeros(shape), torch.zeros(2, 7))
+
+
+def test_missing_checkpoint_names_the_fix(tmp_path):
+    with pytest.raises(FileNotFoundError, match="download_weights"):
+        build_teacher(tmp_path / "missing.pt")
+
+
+def test_real_ecg_fm_gives_logits_for_each_ecg():
+    pytest.importorskip("fairseq_signals", reason="Teacher setup in the README installs fairseq-signals")
+    if not ECG_FM_CHECKPOINT.is_file():
+        pytest.skip("Run bash scripts/download_weights.sh for the ECG-FM checkpoint")
+    teacher = build_teacher(ECG_FM_CHECKPOINT).eval()
+    with torch.inference_mode():
+        logits = teacher(*synthetic_inputs(2))
+    assert logits.shape == (2, 12)
+    assert torch.isfinite(logits).all()
+    assert sum(p.numel() for p in teacher.parameters()) == 90_374_016 + 768 * 12 + 12
+
+
+def separable_features(count: int, seed: int) -> dict[str, np.ndarray]:
+    """Features where overall SHD is 1 exactly when the first feature is positive."""
+    rng = np.random.default_rng(seed)
+    features = (rng.standard_normal((count, 768)) * 12 + 5).astype(np.float32)
+    labels = np.zeros((count, 12), dtype=np.float32)
+    labels[:, SHD_INDEX] = features[:, 0] > 5
+    return {"features": features, "labels": labels, "label_mask": np.ones((count, 12), dtype=bool)}
+
+
+def test_masked_labels_do_not_change_the_loss():
+    logits = torch.tensor([[2.0, -1.0], [0.5, 3.0]])
+    mask = torch.tensor([[True, False], [True, True]])
+    first = masked_bce(logits, torch.tensor([[1.0, 0.0], [0.0, 1.0]]), mask)
+    second = masked_bce(logits, torch.tensor([[1.0, 1.0], [0.0, 1.0]]), mask)
+    expected = torch.nn.functional.binary_cross_entropy_with_logits(
+        torch.tensor([2.0, 0.5, 3.0]), torch.tensor([1.0, 0.0, 1.0]),
+    )
+    torch.testing.assert_close(first, expected)
+    torch.testing.assert_close(second, expected)
+
+
+@pytest.mark.parametrize("rescale", [True, False])
+def test_probe_learns_a_separable_label(rescale):
+    train, val = separable_features(2000, 0), separable_features(500, 1)
+    head, history = fit_probe(train, val, rescale=rescale, lr=1e-2, max_epochs=20, batch_size=64)
+    assert max(history) > 0.8
+    expected_mean = train["features"].mean(0) if rescale else np.zeros(768)
+    np.testing.assert_allclose(head.feature_mean.numpy(), expected_mean, rtol=1e-4, atol=1e-4)
+
+
+def test_extracted_features_follow_dataset_order(data_dir):
+    dataset = EchoNextDataset(data_dir, "val")
+    features = extract_features(Teacher(FakeEncoder()), dataset, batch_size=4)
+    assert features["features"].shape == (len(dataset), 768)
+    np.testing.assert_array_equal(features["row_id"], dataset.selected_metadata["row_id"].to_numpy())

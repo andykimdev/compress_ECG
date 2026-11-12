@@ -2,12 +2,14 @@
 Fine-tune ECG-FM into the Teacher.
 
 Purpose:
+- Convert our ECGs into the input ECG-FM was pretrained on, inside the model.
 - Add a 12-output layer to ECG-FM and fine-tune it with mixed precision.
+- Train the output layer alone on saved ECG-FM features first, as a quick check.
 - Produce a frozen Teacher that follows the shared call format.
 
 Special Notes:
-- Owner: Role B. Every function here is still to be written.
-- Any input conversion ECG-FM needs, such as resampling, stays inside the Teacher.
+- Owner: Role B. train_teacher and load_frozen_teacher are still to be written.
+- Loading ECG-FM needs fairseq-signals, which only this role installs. The README shows how.
 - predictions.write_run saves the Teacher's outputs once the model follows the call format.
 """
 
@@ -15,9 +17,98 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+import torch
+import torch.nn.functional as F
+from sklearn.metrics import roc_auc_score
 from torch import nn
+from torch.utils.data import DataLoader
 
-from .data import EchoNextDataset
+from .data import LABEL_COLUMNS, SHD_INDEX, EchoNextDataset
+
+# ECG-FM was pretrained on 5-second windows at 500 readings per second. Our ECGs are
+# 10 seconds at 250 per second, so each one becomes two windows.
+SOURCE_RATE = 250
+ECG_FM_RATE = 500
+WINDOW_READINGS = 2500
+EMBED_DIM = 768
+# A lead whose spread is below this is treated as flat and set to zero, as ECG-FM's notebook does.
+FLAT_LEAD_STD = 1e-6
+
+
+def to_ecg_fm_input(waveform: torch.Tensor) -> torch.Tensor:
+    """
+    Convert our ECGs into the windows ECG-FM expects.
+
+    Args:
+        waveform: ECGs of shape [batch, 12, 2500], 10 seconds at 250 readings per second.
+
+    Returns:
+        Windows of shape [batch * 2, 12, 2500], 5 seconds each at 500 readings per second.
+        Window 2i is the first half of ECG i, and window 2i + 1 is the second half.
+
+    Notes:
+        Upsampling matches fairseq-signals preprocess.py, which uses scipy interp1d with the
+        first and last readings fixed in place. Each lead is then scaled to mean 0 and spread 1
+        over the whole 10 seconds before splitting, following the order in ECG-FM's notebook.
+    """
+    batch, leads, readings = waveform.shape
+    upsampled = F.interpolate(
+        waveform, size=readings * ECG_FM_RATE // SOURCE_RATE, mode="linear", align_corners=True,
+    )
+    mean = upsampled.mean(dim=-1, keepdim=True)
+    std = upsampled.std(dim=-1, keepdim=True, unbiased=False)
+    flat = std < FLAT_LEAD_STD
+    scaled = torch.where(flat, torch.zeros_like(upsampled), (upsampled - mean) / std.clamp_min(FLAT_LEAD_STD))
+    windows = scaled.reshape(batch, leads, -1, WINDOW_READINGS).transpose(1, 2)
+    return windows.reshape(-1, leads, WINDOW_READINGS)
+
+
+def check_waveform(waveform: torch.Tensor) -> None:
+    """Raise ValueError unless waveform has shape [batch, 12, 2500]."""
+    if waveform.ndim != 3 or tuple(waveform.shape[1:]) != (12, 2500):
+        raise ValueError("Teacher expects waveform [batch,12,2500]")
+
+
+class TeacherHead(nn.Module):
+    """The new output layer, with an optional rescaling of ECG-FM's features in front of it."""
+
+    def __init__(self):
+        super().__init__()
+        self.proj = nn.Linear(EMBED_DIM, len(LABEL_COLUMNS))
+        # Same starting values as ECG-FM's own classification layer.
+        nn.init.xavier_uniform_(self.proj.weight)
+        nn.init.constant_(self.proj.bias, 0.0)
+        # Mean 0 and spread 1 leave the features unchanged until fit_probe sets them.
+        self.register_buffer("feature_mean", torch.zeros(EMBED_DIM))
+        self.register_buffer("feature_std", torch.ones(EMBED_DIM))
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return self.proj((features - self.feature_mean) / self.feature_std)
+
+
+class Teacher(nn.Module):
+    """ECG-FM plus a 12-output layer, in the shared call format."""
+
+    def __init__(self, encoder: nn.Module):
+        super().__init__()
+        self.encoder = encoder
+        self.head = TeacherHead()
+
+    def features(self, waveform: torch.Tensor) -> torch.Tensor:
+        """Return ECG-FM's 768 averaged features for each ECG in waveform [batch, 12, 2500]."""
+        check_waveform(waveform)
+        windows = to_ecg_fm_input(waveform)
+        steps = self.encoder.extract_features(windows, padding_mask=None, mask=False)["x"]
+        # Averaging every time step of both windows matches ECG-FM's classifier for one window.
+        return steps.mean(dim=1).reshape(waveform.shape[0], -1, EMBED_DIM).mean(dim=1)
+
+    def forward(self, waveform: torch.Tensor, tabular: torch.Tensor) -> torch.Tensor:
+        check_waveform(waveform)
+        if tuple(tabular.shape) != (waveform.shape[0], 7):
+            raise ValueError("Teacher expects tabular [batch,7]")
+        # The 7 extra numbers are not used. ECG-FM only reads the waveform.
+        return self.head(self.features(waveform))
 
 
 def build_teacher(pretrained_path: str | Path, *, device: str = "cpu") -> nn.Module:
@@ -29,9 +120,111 @@ def build_teacher(pretrained_path: str | Path, *, device: str = "cpu") -> nn.Mod
         device: Where the model is placed.
 
     Returns:
-        A model where model(waveform, tabular) returns logits [batch, 12]. It may ignore tabular.
+        A model where model(waveform, tabular) returns logits [batch, 12]. It ignores tabular.
+
+    Raises:
+        FileNotFoundError: When the checkpoint is missing.
+        ImportError: When fairseq-signals is not installed.
     """
-    raise NotImplementedError("Role B: wrap ECG-FM in the shared call format")
+    pretrained_path = Path(pretrained_path)
+    if not pretrained_path.is_file():
+        raise FileNotFoundError(f"No ECG-FM checkpoint at {pretrained_path}. Run scripts/download_weights.sh")
+    try:
+        from fairseq_signals.models import build_model_from_checkpoint
+    except ImportError as error:
+        raise ImportError("Loading ECG-FM needs fairseq-signals. See Teacher setup in the README") from error
+    encoder = build_model_from_checkpoint(checkpoint_path=str(pretrained_path))
+    # The quantizer and projection layers only served pretraining. Removing them leaves 90,374,016 parameters.
+    encoder.remove_pretraining_modules()
+    return Teacher(encoder).to(device)
+
+
+@torch.inference_mode()
+def extract_features(
+    teacher: Teacher, dataset: EchoNextDataset, *, batch_size: int = 32,
+    num_workers: int = 0, device: str = "cpu",
+) -> dict[str, np.ndarray]:
+    """
+    Run ECG-FM once over a dataset and keep its averaged features.
+
+    Args:
+        teacher: Output of build_teacher. Only its encoder is used.
+        dataset: The ECGs to run.
+        batch_size: ECGs per step.
+        num_workers: Data loader workers.
+        device: Where ECG-FM runs.
+
+    Returns:
+        features float32 [N, 768], labels [N, 12] with missing labels set to 0,
+        label_mask [N, 12], and row_id [N], in the dataset's order.
+    """
+    teacher = teacher.to(device).eval()
+    parts = {key: [] for key in ("features", "labels", "label_mask", "row_id")}
+    for batch in DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers):
+        parts["features"].append(teacher.features(batch["waveform"].to(device)).float().cpu().numpy())
+        for key in ("labels", "label_mask", "row_id"):
+            parts[key].append(batch[key].numpy())
+    return {key: np.concatenate(values) for key, values in parts.items()}
+
+
+def masked_bce(logits: torch.Tensor, labels: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Average the binary cross-entropy over observed labels only."""
+    losses = F.binary_cross_entropy_with_logits(logits, labels, reduction="none")
+    return losses[mask].mean()
+
+
+def shd_auroc(head: TeacherHead, features: dict[str, np.ndarray]) -> float:
+    """Return the overall SHD AUROC of a head on saved features."""
+    with torch.no_grad():
+        scores = head(torch.from_numpy(features["features"]))[:, SHD_INDEX].numpy()
+    return float(roc_auc_score(features["labels"][:, SHD_INDEX], scores))
+
+
+def fit_probe(
+    train: dict[str, np.ndarray], val: dict[str, np.ndarray], *, rescale: bool, lr: float,
+    max_epochs: int = 100, patience: int = 5, batch_size: int = 1024, seed: int = 42,
+) -> tuple[TeacherHead, list[float]]:
+    """
+    Train only the output layer on saved ECG-FM features, keeping the best epoch.
+
+    Args:
+        train: Output of extract_features on the Training ECGs.
+        val: Output of extract_features on the Validation ECGs, used to pick the epoch.
+        rescale: Whether to scale each feature to mean 0 and spread 1, using Training values.
+        lr: Adam learning rate.
+        max_epochs: Upper limit on passes over the Training ECGs.
+        patience: Epochs without a better Validation SHD AUROC before stopping.
+        batch_size: ECGs per step.
+        seed: Random seed for the starting values and batch order.
+
+    Returns:
+        The head from the epoch with the best Validation SHD AUROC, and that AUROC for each epoch.
+    """
+    torch.manual_seed(seed)
+    head = TeacherHead()
+    features = torch.from_numpy(train["features"])
+    if rescale:
+        head.feature_mean.copy_(features.mean(dim=0))
+        head.feature_std.copy_(features.std(dim=0, unbiased=False).clamp_min(FLAT_LEAD_STD))
+    labels = torch.from_numpy(train["labels"]).float()
+    mask = torch.from_numpy(train["label_mask"]).bool()
+    optimizer = torch.optim.Adam(head.proj.parameters(), lr=lr)
+    generator = torch.Generator().manual_seed(seed)
+    history, best_state = [], None
+    for _ in range(max_epochs):
+        head.train()
+        for rows in torch.randperm(len(features), generator=generator).split(batch_size):
+            optimizer.zero_grad()
+            masked_bce(head(features[rows]), labels[rows], mask[rows]).backward()
+            optimizer.step()
+        head.eval()
+        history.append(shd_auroc(head, val))
+        if history[-1] >= max(history):
+            best_state = {key: value.clone() for key, value in head.state_dict().items()}
+        elif len(history) - 1 - int(np.argmax(history)) >= patience:
+            break
+    head.load_state_dict(best_state)
+    return head, history
 
 
 def train_teacher(
