@@ -1,0 +1,8 @@
+model,learning_rate,best_epoch,epochs_run,lvef_lte_45_flag,lvwt_gte_13_flag,aortic_stenosis_moderate_or_greater_flag,aortic_regurgitation_moderate_or_greater_flag,mitral_regurgitation_moderate_or_greater_flag,tricuspid_regurgitation_moderate_or_greater_flag,pulmonary_regurgitation_moderate_or_greater_flag,rv_systolic_dysfunction_moderate_or_greater_flag,pericardial_effusion_moderate_large_flag,pasp_gte_45_flag,tr_max_gte_32_flag,shd_moderate_or_greater_flag
+probe_rescaled,0.0001,78.0,83.0,0.8864,0.7445,0.782,0.5652,0.8089,0.8025,0.4993,0.8615,0.6654,0.7595,0.7712,0.8216
+probe_rescaled,0.001,10.0,15.0,0.8884,0.7422,0.7721,0.5602,0.8041,0.8033,0.5042,0.8642,0.6702,0.7634,0.7732,0.8219
+probe_rescaled,0.01,18.0,23.0,0.8866,0.7328,0.7834,0.6836,0.8035,0.7881,0.5606,0.8522,0.7191,0.7496,0.7665,0.8182
+probe_raw,0.0001,43.0,48.0,0.8605,0.7205,0.7418,0.6183,0.8124,0.7881,0.5342,0.8441,0.6681,0.7327,0.7526,0.7981
+probe_raw,0.001,18.0,23.0,0.8702,0.7154,0.7828,0.7368,0.8106,0.7929,0.6291,0.8477,0.7224,0.7343,0.7531,0.8058
+probe_raw,0.01,15.0,20.0,0.8676,0.6835,0.7726,0.6958,0.7327,0.74,0.6281,0.8285,0.6651,0.6976,0.7023,0.7961
+echonext_mini,,,,0.8498,0.724,0.844,0.7735,0.8231,0.8331,0.726,0.8679,0.7215,0.7594,0.7681,0.8148
