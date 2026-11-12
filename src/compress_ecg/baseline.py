@@ -12,10 +12,11 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import json
 from torch import nn
 
-from .data import EchoNextDataset
-from .predictions import fresh_run_dir, predict, run_manifest, save_run, sha256_file
+from .data import EchoNextDataset, AUDIT_COLUMNS
+from .predictions import fresh_run_dir, predict, run_manifest, save_run, sha256_file, basic_metrics
 
 INTROECG_COMMIT = "15233e9392e9dc10c136a5624abf10199207bce9"
 MINI_WEIGHTS_SHA256 = "aac57aad0ec9763021c6264e89c74e3d78f8b711159b1880e5bd4515d5e21cd6"
@@ -101,7 +102,23 @@ def run_baseline(
         source_sha256=MINI_SOURCE_SHA256, requested_limit=limit, seed=seed,
         batch_size=batch_size, num_workers=num_workers, device=device,
     )
+    # How to attach the metadata here?
+    # Use dataset.metadata, and join in row_id
+    group_metrics = {}
+    for col in AUDIT_COLUMNS:
+        group_partition = {name: group for name, group in dataset.selected_metadata.groupby(col)}
+        partition_metrics = {}
+        for group_name, partition in group_partition.items():
+            group_mask = np.isin(outputs["row_id"], partition["row_id"])
+            group_outputs = {output_name: output_val[group_mask] for output_name, output_val in outputs.items() if output_name != "label_columns"}
+            group_outputs["label_columns"] = outputs["label_columns"]
+
+            metrics = basic_metrics(group_outputs)
+            partition_metrics[group_name] = metrics
+        group_metrics[col] = partition_metrics
     metrics = save_run(destination, outputs, dataset.selected_metadata, manifest)
+
+    (destination / "group_metrics.json").write_text(json.dumps(group_metrics, indent=2, allow_nan=False) + "\n")
     return {"output_dir": str(destination), "n_records": len(dataset), "metrics": metrics}
 
 
