@@ -11,8 +11,13 @@ the aligned prediction files. Profiling uses synthetic inputs and runs independe
    clones this branch in its first cell. Set `CODE_COMMIT` to the pushed SHA for exact repeats.
 2. Upload/open `notebooks/01_data_and_baseline.ipynb` in a **private** Kaggle notebook.
    Attach the existing private EchoNext dataset. Keep the original filenames and order.
-3. Enable Internet for the code, dependencies, and Mini weights. CPU works. The notebook
-   uses CUDA for Mini when a GPU is enabled, and gradient boosting runs on CPU.
+3. Enable Internet for the code, dependencies, and Mini weights. GitHub requires a token
+   that can read the private `andykimdev/compress_ECG` repository. In Kaggle **Add-ons → Secrets**,
+   add it as `GITHUB_TOKEN` and grant the notebook access. A fine-grained token needs
+   **Contents: Read-only** for this repository. If your collaborator account cannot select
+   the repository for a fine-grained token, use a short-lived classic token with `repo` scope.
+   The setup cell reads the secret at runtime. The notebook uses CUDA for Mini when a GPU
+   is enabled, and gradient boosting runs on CPU.
 4. Leave `RUN_MODE = 'smoke'` and run all cells. The notebook locates the data under
    `/kaggle/input`. If discovery fails, set `DATA_DIR` to the folder with the metadata CSV.
    Check that both models report finite `(1000, 12)` probabilities.
