@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 import shutil
 
 import pandas as pd
@@ -83,6 +84,41 @@ def test_matching_metadata_reaches_training(training_inputs, tmp_path, monkeypat
     monkeypatch.setattr(distill, "distillation_loss", stop_at_loss)
     with pytest.raises(ReachedTraining):
         distill.train_student(TinyStudent(), teacher_run, train, val, tmp_path / "student")
+
+
+def test_training_uses_notebook_settings_and_records_them(training_inputs, tmp_path):
+    train, val, teacher_run = training_inputs
+    student = TinyStudent()
+    before = student.layer.weight.detach().clone()
+    output = tmp_path / "student"
+    settings = {
+        "batch_size": 2, "learning_rate": 0.002, "weight_decay": 0.,
+        "max_epochs": 2, "patience": 2, "min_delta": 0.,
+        "temperature": 3., "hard_label_weight": 0.25, "num_workers": 0,
+    }
+
+    checkpoint = distill.train_student(student, teacher_run, train, val, output, **settings)
+
+    history = json.loads((output / "history.json").read_text())
+    saved_settings = json.loads((output / "training_config.json").read_text())
+    assert len(history) == 2
+    assert checkpoint.is_file()
+    assert not torch.equal(before, student.layer.weight)
+    for name, value in settings.items():
+        assert saved_settings[name] == value
+    assert saved_settings["teacher_manifest"] == teacher_run.manifest
+
+
+@pytest.mark.parametrize("settings", [
+    {"max_epochs": 0}, {"batch_size": 0}, {"patience": 0},
+    {"learning_rate": -1.}, {"temperature": 0.}, {"hard_label_weight": 1.1},
+])
+def test_invalid_training_settings_fail_before_writing(training_inputs, tmp_path, settings):
+    train, val, teacher_run = training_inputs
+    output = tmp_path / "student"
+    with pytest.raises(ValueError):
+        distill.train_student(TinyStudent(), teacher_run, train, val, output, **settings)
+    assert not output.exists()
 
 
 def test_distillation_gradient_combines_binary_targets_and_freezes_teacher():

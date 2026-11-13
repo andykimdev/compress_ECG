@@ -92,6 +92,15 @@ def train_student(
     *, 
     device: str = "cpu", 
     seed: int = 42,
+    batch_size: int = 32,
+    learning_rate: float = 1e-3,
+    weight_decay: float = 1e-4,
+    max_epochs: int = 50,
+    patience: int = 7,
+    min_delta: float = 0.001,
+    temperature: float = 2.0,
+    hard_label_weight: float = 0.5,
+    num_workers: int = 0,
 ) -> Path:
     """
     Train the Student and save the best checkpoint.
@@ -104,20 +113,34 @@ def train_student(
         output_dir: Folder for checkpoints. Save them with student.save_student.
         device: Where training runs.
         seed: Random seed.
+        batch_size: ECGs per training or validation batch.
+        learning_rate: AdamW learning rate.
+        weight_decay: AdamW weight decay.
+        max_epochs: Maximum number of training epochs.
+        patience: Epochs without meaningful validation AUROC improvement before stopping.
+        min_delta: AUROC improvement required to reset patience.
+        temperature: Softening used in the distillation loss.
+        hard_label_weight: Share of the loss from observed true labels, from 0 to 1.
+        num_workers: DataLoader worker processes; zero loads in the main process.
 
     Returns:
         The path of the best checkpoint.
     """
 
-    # Init Training Settings
-    batch_size = 32
-    learning_rate = 1e-3
-    weight_decay = 1e-4
-    max_epochs = 50
-    patience = 7
-    min_delta = 0.001
-    temperature = 2.0
-    hard_label_weight = 0.5
+    for name, value, minimum in (
+        ("batch_size", batch_size, 1), ("max_epochs", max_epochs, 1),
+        ("patience", patience, 1), ("num_workers", num_workers, 0),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise ValueError(f"{name} must be an integer >= {minimum}")
+    for name, value, strictly_positive in (
+        ("learning_rate", learning_rate, True), ("weight_decay", weight_decay, False),
+        ("min_delta", min_delta, False), ("temperature", temperature, True),
+    ):
+        if not math.isfinite(value) or value < 0 or (strictly_positive and value == 0):
+            raise ValueError(f"{name} must be finite and {'positive' if strictly_positive else 'nonnegative'}")
+    if not math.isfinite(hard_label_weight) or not 0 <= hard_label_weight <= 1:
+        raise ValueError("hard_label_weight must be between 0 and 1")
 
     random.seed(seed)
     np.random.seed(seed)
@@ -164,7 +187,7 @@ def train_student(
         train,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=0,
+        num_workers=num_workers,
         generator=generator
     )
 
@@ -172,7 +195,7 @@ def train_student(
         val,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=0
+        num_workers=num_workers
     )
 
     optimizer = AdamW(
@@ -187,6 +210,19 @@ def train_student(
     best_checkpoint_path = output_dir / "best_student.pt"
     if best_checkpoint_path.exists():
         raise FileExistsError(best_checkpoint_path)
+
+    settings = {
+        "seed": seed, "device": device, "batch_size": batch_size,
+        "learning_rate": learning_rate, "weight_decay": weight_decay,
+        "max_epochs": max_epochs, "patience": patience, "min_delta": min_delta,
+        "temperature": temperature, "hard_label_weight": hard_label_weight,
+        "num_workers": num_workers, "train_records": len(train),
+        "val_records": len(val), "train_seed": train.seed, "val_seed": val.seed,
+        "teacher_manifest": teacher_run.manifest,
+    }
+    (output_dir / "training_config.json").write_text(
+        json.dumps(settings, indent=2, allow_nan=False) + "\n"
+    )
 
     early_stopping_auc = float("-inf")
     best_val_auc = float("-inf")
@@ -316,6 +352,8 @@ def train_student(
         )
 
         print(
+            f"Epoch {epoch + 1}/{max_epochs} | Train loss: {train_loss:.4f} | "
+            f"Val loss: {val_loss:.4f} | Val AUROC: {val_auc:.4f} | "
             f"Best validation AUROC: {best_val_auc:.4f} | "
             f"Patience: {epochs_without_improvement}/{patience}"
         )

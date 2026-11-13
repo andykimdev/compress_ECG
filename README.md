@@ -289,6 +289,14 @@ python scripts/run_baseline.py --config configs/mini_baseline.json
 pytest -q
 ```
 
+For Role C experiments, open
+[`notebooks/03_student_distillation.ipynb`](notebooks/03_student_distillation.ipynb).
+It starts with a two-epoch Mini stand-in run, caches Mini predictions, plots learning
+curves, and compares validation metrics. Dataset limits and training settings are
+configured in notebook cells; the loss and training loop remain in `src/`.
+Notebook number 02 is reserved for Teacher training. Set the Teacher source and
+saved-run paths in notebook 03 when the real Teacher is ready.
+
 ## Repository layout
 
 | Folder | Contents |
