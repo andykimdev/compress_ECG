@@ -6,7 +6,7 @@ Purpose:
 - Train a Student from saved Teacher logits, without loading the Teacher itself.
 
 Special Notes:
-- Owner: Role C. Every function here is still to be written.
+- Owner: Role C.
 - During Phase 1, the Teacher run can be EchoNext-Mini's saved run on the Training ECGs.
 - Inside the training loop, predictions.aligned_logits(run, batch["row_id"]) finds each
   batch's Teacher logits, including when batches are shuffled.
@@ -15,6 +15,7 @@ Special Notes:
 from __future__ import annotations
 
 import random
+import math
 from pathlib import Path
 import json
 
@@ -22,15 +23,15 @@ from .student import save_student
 
 import numpy as np
 import torch
-from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.optim.adamw import AdamW
 
 from sklearn.metrics import roc_auc_score
 
-from .data import EchoNextDataset, SHD_INDEX
-from .predictions import PredictionRun, aligned_logits
+from .baseline import EchoNextMini
+from .data import EchoNextDataset, SHD_INDEX, find_metadata_file
+from .predictions import PredictionRun, aligned_logits, sha256_file
 
 
 def distillation_loss(
@@ -39,6 +40,12 @@ def distillation_loss(
 ) -> torch.Tensor:
     """
     Combine copying the Teacher with matching the true labels.
+
+    Each output is an independent binary task. The hard loss averages BCE over
+    observed labels; the soft loss averages BCE against detached Teacher sigmoid
+    probabilities over all outputs, including those without a true label. Both
+    logits are divided by temperature for the soft loss, which is scaled by T^2.
+    With no observed labels, the hard loss is zero.
 
     Args:
         student_logits: Student outputs [batch, 12].
@@ -51,11 +58,33 @@ def distillation_loss(
     Returns:
         A single loss value.
     """
-    raise NotImplementedError("Role C: combine soft Teacher and hard label losses")
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("temperature must be finite and positive")
+    if not math.isfinite(hard_label_weight) or not 0 <= hard_label_weight <= 1:
+        raise ValueError("hard_label_weight must be between 0 and 1")
+    if student_logits.ndim != 2 or student_logits.shape[0] == 0 or student_logits.shape[1] != 12:
+        raise ValueError("student_logits must have shape [batch, 12] with a nonempty batch")
+    if any(tensor.shape != student_logits.shape for tensor in (teacher_logits, labels, label_mask)):
+        raise ValueError("teacher_logits, labels, and label_mask must match student_logits shape")
+    if label_mask.dtype != torch.bool:
+        raise ValueError("label_mask must be boolean")
+
+    # Select observed entries before BCE so masked NaNs cannot enter the loss.
+    hard_loss = F.binary_cross_entropy_with_logits(
+        student_logits[label_mask], labels[label_mask].to(student_logits.dtype), reduction="sum",
+    ) / label_mask.sum().clamp_min(1)
+
+    teacher_probabilities = torch.sigmoid(teacher_logits.detach() / temperature)
+    soft_loss = F.binary_cross_entropy_with_logits(
+        student_logits / temperature, teacher_probabilities, reduction="mean",
+    ) * temperature ** 2
+
+    return hard_label_weight * hard_loss + (1 - hard_label_weight) * soft_loss
+
 
 
 def train_student(
-    student: nn.Module, 
+    student: EchoNextMini, 
     teacher_run: PredictionRun, 
     train: EchoNextDataset, 
     val: EchoNextDataset,
@@ -103,6 +132,24 @@ def train_student(
 
     if teacher_run.manifest["split"] != "train":
         raise ValueError("Teacher predictions must come from the training split")
+
+    # Row IDs are CSV positions, so they are meaningful only for the same metadata.
+    train_metadata_path = find_metadata_file(train.root)
+    val_metadata_path = find_metadata_file(val.root)
+    if train_metadata_path is None:
+        raise FileNotFoundError(f"No EchoNext metadata CSV in {train.root}")
+    if val_metadata_path is None:
+        raise FileNotFoundError(f"No EchoNext metadata CSV in {val.root}")
+    train_metadata_hash = sha256_file(train_metadata_path)
+    val_metadata_hash = sha256_file(val_metadata_path)
+    if train_metadata_hash != val_metadata_hash:
+        raise ValueError("Training and validation datasets must use the same metadata")
+
+    teacher_metadata_hash = teacher_run.manifest.get("metadata_sha256")
+    if not teacher_metadata_hash:
+        raise ValueError("Teacher run is missing metadata_sha256; regenerate its predictions")
+    if teacher_metadata_hash != train_metadata_hash:
+        raise ValueError("Teacher run metadata_sha256 does not match the training dataset")
 
     train_row_ids = train.selected_metadata["row_id"].to_numpy()
     teacher_row_ids = teacher_run.arrays["row_id"]
@@ -243,7 +290,7 @@ def train_student(
 
         val_auc = float(roc_auc_score(y_true, y_prob))
 
-                # Save whenever we achieve a new best validation AUROC.
+        # Save whenever we achieve a new best validation AUROC.
         if val_auc > best_val_auc:
             best_val_auc = val_auc
             save_student(student, best_checkpoint_path)
