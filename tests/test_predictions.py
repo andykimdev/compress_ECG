@@ -1,4 +1,7 @@
 import json
+import subprocess
+import sys
+import textwrap
 
 import numpy as np
 import pytest
@@ -90,3 +93,34 @@ def test_synthetic_inputs_follow_call_format_and_repeat():
     assert tabular.shape == (3, 7)
     assert waveform.dtype == tabular.dtype == torch.float32
     torch.testing.assert_close(waveform, synthetic_inputs(3, seed=1)[0])
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Only Linux counts shared-memory handles against the open-file limit")
+def test_scoring_many_batches_with_workers_stays_under_the_open_file_limit():
+    script = textwrap.dedent("""
+        import resource
+        import torch
+        from compress_ecg.predictions import predict
+
+        class Ecgs(torch.utils.data.Dataset):
+            def __len__(self):
+                return 600
+
+            def __getitem__(self, index):
+                return {
+                    "waveform": torch.zeros(12, 2500), "tabular": torch.zeros(7), "labels": torch.zeros(12),
+                    "label_mask": torch.ones(12, dtype=torch.bool), "row_id": index, "split_row": index,
+                    "patient_key": str(index),
+                }
+
+        class Zeros(torch.nn.Module):
+            def forward(self, waveform, tabular):
+                return torch.zeros(waveform.shape[0], 12)
+
+        # 600 batches of one ECG would keep 1,800 files open if every array stayed a view.
+        resource.setrlimit(resource.RLIMIT_NOFILE, (600, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
+        print(predict(Zeros(), Ecgs(), batch_size=1, num_workers=2)["logits"].shape)
+    """)
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=300)
+    assert result.returncode == 0, result.stderr[-400:]
+    assert result.stdout.strip() == "(600, 12)"

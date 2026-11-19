@@ -110,13 +110,15 @@ def predict(
         if not torch.isfinite(logits).all():
             raise ValueError("Model produced non-finite logits")
         parts["logits"].append(logits.float().cpu().numpy())
+        # Copy every array. A view would keep a worker's shared-memory file open until the loop
+        # ends, and a large split with workers would pass the open-file limit.
         labels = batch["labels"].numpy().copy()
-        mask = batch["label_mask"].numpy()
+        mask = batch["label_mask"].numpy().copy()
         labels[~mask] = np.nan
         parts["labels"].append(labels)
         parts["label_mask"].append(mask)
         for key in ("row_id", "split_row"):
-            parts[key].append(batch[key].numpy())
+            parts[key].append(batch[key].numpy().copy())
         patient_keys.extend(batch["patient_key"])
     outputs = {key: np.concatenate(values) for key, values in parts.items()}
     outputs["probabilities"] = torch.sigmoid(torch.from_numpy(outputs["logits"])).numpy()
