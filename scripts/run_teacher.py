@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Role B: fine-tune the Teacher and save its predictions. Install first: pip install -e ."""
+"""Role B: fine-tune the Teacher, or load a saved one, and save its predictions. Install first: pip install -e ."""
 
 import argparse
 
@@ -16,6 +16,7 @@ def main() -> None:
     parser.add_argument("--runs-root", default="runs")
     parser.add_argument("--device", default="cpu", help="cpu, cuda or mps")
     parser.add_argument("--with-test", action="store_true", help="Also score Test, in Phase 2 only")
+    parser.add_argument("--checkpoint", help="Score this saved Teacher and skip training")
     parser.add_argument("--probe-head", help="Output layer from run_teacher_probe.py to start from")
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate for ECG-FM")
     parser.add_argument("--head-lr", type=float, default=1e-4, help="Learning rate for the output layer")
@@ -29,12 +30,14 @@ def main() -> None:
 
     train = EchoNextDataset(args.data_dir, "train", limit=args.limit)
     val = EchoNextDataset(args.data_dir, "val", limit=args.limit)
-    teacher = build_teacher(args.pretrained, device=args.device)
-    checkpoint = train_teacher(
-        teacher, train, val, args.output_dir, device=args.device, probe_head=args.probe_head,
-        lr=args.lr, head_lr=args.head_lr, batch_size=args.batch_size, max_epochs=args.max_epochs,
-        patience=args.patience, num_workers=args.num_workers, log_every=args.log_every,
-    )
+    checkpoint = args.checkpoint
+    if checkpoint is None:
+        teacher = build_teacher(args.pretrained, device=args.device)
+        checkpoint = train_teacher(
+            teacher, train, val, args.output_dir, device=args.device, probe_head=args.probe_head,
+            lr=args.lr, head_lr=args.head_lr, batch_size=args.batch_size, max_epochs=args.max_epochs,
+            patience=args.patience, num_workers=args.num_workers, log_every=args.log_every,
+        )
     frozen = load_frozen_teacher(checkpoint, pretrained_path=args.pretrained, device=args.device)
     datasets = [train, val] + ([EchoNextDataset(args.data_dir, "test")] if args.with_test else [])
     for dataset in datasets:
