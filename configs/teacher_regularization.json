@@ -1,0 +1,24 @@
+{
+  "base": {
+    "lr": 1e-5,
+    "head_lr": 1e-4,
+    "batch_size": 64,
+    "num_workers": 8,
+    "max_epochs": 20,
+    "patience": 2,
+    "seed": 42,
+    "log_every": 200,
+    "probe_head": "checkpoints/teacher/probe/rescaled_lr0.001.pt"
+  },
+  "extra_runs": [
+    {"head_dropout": 0.3, "seed": 42},
+    {"head_dropout": 0.3, "seed": 43},
+    {"lead_mask_prob": 0.2, "seed": 42},
+    {"lead_mask_prob": 0.2, "seed": 43},
+    {"balance_patients": 0.5, "seed": 42},
+    {"balance_patients": 0.5, "seed": 43},
+    {"head_dropout": 0.3, "lead_mask_prob": 0.2, "balance_patients": 0.5, "seed": 42},
+    {"head_dropout": 0.3, "lead_mask_prob": 0.2, "balance_patients": 0.5, "seed": 43}
+  ],
+  "max_parallel": 3
+}

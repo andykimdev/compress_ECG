@@ -32,7 +32,9 @@ from .predictions import sha256_file
 CONFIG_NAME = "config.json"
 RESULT_NAME = "result.json"
 # Settings shown as table columns. Every setting stays in config.json.
-TABLE_SETTINGS = ("lr", "head_lr", "seed", "batch_size", "max_epochs", "patience")
+TABLE_SETTINGS = (
+    "lr", "head_lr", "head_dropout", "lead_mask_prob", "balance_patients", "seed", "batch_size", "max_epochs", "patience",
+)
 
 
 def code_version() -> dict:

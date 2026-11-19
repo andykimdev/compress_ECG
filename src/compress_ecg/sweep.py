@@ -20,13 +20,17 @@ from pathlib import Path
 FLAGS = {
     "lr": "--lr", "head_lr": "--head-lr", "seed": "--seed", "batch_size": "--batch-size",
     "max_epochs": "--max-epochs", "patience": "--patience", "num_workers": "--num-workers",
-    "probe_head": "--probe-head", "log_every": "--log-every",
+    "probe_head": "--probe-head", "log_every": "--log-every", "head_dropout": "--head-dropout",
+    "lead_mask_prob": "--lead-mask-prob", "balance_patients": "--balance-patients",
 }
+# Settings that change the result, and the short tag each adds to a run name when it is on.
+NAME_TAGS = (("head_dropout", "do"), ("lead_mask_prob", "lm"), ("balance_patients", "bp"))
 
 
 def run_id_for(settings: dict) -> str:
-    """Name a run from its two learning rates and its seed."""
-    return f"lr{settings['lr']:g}_hlr{settings['head_lr']:g}_s{settings['seed']}"
+    """Name a run from its learning rates, its seed, and any overfitting control that is on."""
+    tags = "".join(f"_{tag}{settings[name]:g}" for name, tag in NAME_TAGS if settings.get(name))
+    return f"lr{settings['lr']:g}_hlr{settings['head_lr']:g}{tags}_s{settings['seed']}"
 
 
 def expand_runs(config: dict) -> list[dict]:

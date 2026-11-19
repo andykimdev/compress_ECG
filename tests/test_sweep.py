@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from compress_ecg.sweep import build_command, expand_runs, free_gpu_indices, run_id_for
@@ -58,3 +61,29 @@ def test_only_gpus_with_no_process_little_memory_and_low_load_are_free():
         {"index": 4, "bus_id": "E", "used_mib": 14, "util": 60},
     ]
     assert free_gpu_indices(gpus, {"C"}) == [1]
+
+
+def test_run_id_adds_a_tag_for_each_overfitting_control_that_is_on():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "head_dropout": 0.3, "lead_mask_prob": 0.0, "balance_patients": 0.5}
+    assert run_id_for(settings) == "lr1e-05_hlr0.0001_do0.3_bp0.5_s42"
+
+
+def test_command_passes_the_overfitting_controls():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "head_dropout": 0.3, "balance_patients": 0.5}
+    command = build_command(settings, run_id="r1", runs_root="runs/sweep", python="py")
+    assert command[-10:] == [
+        "--lr", "1e-05", "--head-lr", "0.0001", "--seed", "42", "--head-dropout", "0.3", "--balance-patients", "0.5",
+    ]
+
+
+def test_regularization_config_gives_nine_runs_with_unique_names():
+    config = json.loads((Path(__file__).resolve().parents[1] / "configs" / "teacher_regularization.json").read_text())
+    runs = expand_runs(config)
+    names = [run_id_for(run) for run in runs]
+    assert names == [
+        "lr1e-05_hlr0.0001_s42",
+        "lr1e-05_hlr0.0001_do0.3_s42", "lr1e-05_hlr0.0001_do0.3_s43",
+        "lr1e-05_hlr0.0001_lm0.2_s42", "lr1e-05_hlr0.0001_lm0.2_s43",
+        "lr1e-05_hlr0.0001_bp0.5_s42", "lr1e-05_hlr0.0001_bp0.5_s43",
+        "lr1e-05_hlr0.0001_do0.3_lm0.2_bp0.5_s42", "lr1e-05_hlr0.0001_do0.3_lm0.2_bp0.5_s43",
+    ]
