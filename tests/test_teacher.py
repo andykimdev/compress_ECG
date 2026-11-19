@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 
 import numpy as np
@@ -8,7 +9,8 @@ from scipy.interpolate import interp1d
 from compress_ecg.data import SHD_INDEX, EchoNextDataset
 from compress_ecg.profiling import synthetic_inputs
 from compress_ecg.teacher import (
-    Teacher, build_teacher, extract_features, fit_probe, masked_bce, to_ecg_fm_input,
+    Teacher, build_teacher, extract_features, fit_probe, masked_bce, mean_auroc,
+    restore_teacher, to_ecg_fm_input, train_teacher,
 )
 
 ECG_FM_CHECKPOINT = (
@@ -120,3 +122,31 @@ def test_extracted_features_follow_dataset_order(data_dir):
     features = extract_features(Teacher(FakeEncoder()), dataset, batch_size=4)
     assert features["features"].shape == (len(dataset), 768)
     np.testing.assert_array_equal(features["row_id"], dataset.selected_metadata["row_id"].to_numpy())
+
+
+def test_mean_auroc_skips_outputs_without_a_score():
+    metrics = {"a": {"auroc": 0.8}, "b": {"auroc": None}, "c": {"auroc": 0.6}}
+    assert mean_auroc(metrics) == pytest.approx(0.7)
+
+
+def test_training_saves_the_epoch_with_the_best_mean_auroc(data_dir, tmp_path):
+    torch.manual_seed(0)
+    train, val = EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val")
+    # A large step size makes the score move up and down between epochs.
+    best = train_teacher(
+        Teacher(FakeEncoder()), train, val, tmp_path / "teacher", head_lr=5.0, max_epochs=6, patience=10,
+    )
+    log = list(csv.DictReader((tmp_path / "teacher" / "log.csv").open()))
+    scores = [float(row["val_mean_auroc"]) for row in log]
+    assert len(scores) == 6
+    expected_epoch = max(range(6), key=lambda i: (scores[i], i)) + 1
+    assert torch.load(best, weights_only=True)["epoch"] == expected_epoch
+
+
+def test_restored_teacher_gives_the_same_logits(data_dir, tmp_path):
+    train, val = EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val")
+    trained = Teacher(FakeEncoder())
+    best = train_teacher(trained, train, val, tmp_path / "teacher", max_epochs=1)
+    restored = restore_teacher(Teacher(FakeEncoder()), best).eval()
+    inputs = synthetic_inputs(2)
+    torch.testing.assert_close(restored(*inputs), trained.eval()(*inputs))

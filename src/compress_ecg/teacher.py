@@ -8,13 +8,15 @@ Purpose:
 - Produce a frozen Teacher that follows the shared call format.
 
 Special Notes:
-- Owner: Role B. train_teacher and load_frozen_teacher are still to be written.
+- Owner: Role B.
 - Loading ECG-FM needs fairseq-signals, which only this role installs. The README shows how.
 - predictions.write_run saves the Teacher's outputs once the model follows the call format.
 """
 
 from __future__ import annotations
 
+import csv
+import time
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +27,11 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from .data import LABEL_COLUMNS, SHD_INDEX, EchoNextDataset
+from .predictions import basic_metrics, predict
 
+DEFAULT_PRETRAINED = (
+    Path(__file__).resolve().parents[2] / "checkpoints/pretrained/ecg_fm/mimic_iv_ecg_physionet_pretrained.pt"
+)
 # ECG-FM was pretrained on 5-second windows at 500 readings per second. Our ECGs are
 # 10 seconds at 250 per second, so each one becomes two windows.
 SOURCE_RATE = 250
@@ -227,9 +233,16 @@ def fit_probe(
     return head, history
 
 
+def mean_auroc(metrics: dict) -> float:
+    """Average the AUROC over every output that has one. This score picks the best epoch."""
+    return float(np.mean([entry["auroc"] for entry in metrics.values() if entry["auroc"] is not None]))
+
+
 def train_teacher(
     teacher: nn.Module, train: EchoNextDataset, val: EchoNextDataset, output_dir: str | Path,
-    *, device: str = "cpu", seed: int = 42,
+    *, device: str = "cpu", seed: int = 42, probe_head: str | Path | None = None,
+    lr: float = 1e-5, head_lr: float = 1e-4, batch_size: int = 32, max_epochs: int = 10,
+    patience: int = 2, num_workers: int = 0, log_every: int = 200,
 ) -> Path:
     """
     Fine-tune the Teacher and save the best checkpoint.
@@ -241,22 +254,102 @@ def train_teacher(
         output_dir: Folder for checkpoints. Never choose settings using Test ECGs.
         device: Where training runs.
         seed: Random seed.
+        probe_head: Output layer saved by scripts/run_teacher_probe.py, used as the starting point.
+        lr: AdamW learning rate for ECG-FM.
+        head_lr: AdamW learning rate for the output layer.
+        batch_size: ECGs per step.
+        max_epochs: Upper limit on passes over the Training ECGs.
+        patience: Epochs without a better Validation mean AUROC before stopping.
+        num_workers: Data loader workers.
+        log_every: Steps between progress lines.
 
     Returns:
-        The path of the best checkpoint.
+        The path of the best checkpoint, chosen by the mean AUROC over all 12 outputs.
+
+    Notes:
+        Writes best.pt and log.csv, with one row per epoch, to output_dir. On a GPU that
+        supports it, the forward pass runs in bfloat16 mixed precision.
     """
-    raise NotImplementedError("Role B: fine-tune with mixed precision, masking missing labels")
+    torch.manual_seed(seed)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if probe_head is not None:
+        teacher.head.load_state_dict(torch.load(probe_head, map_location="cpu", weights_only=True))
+    # ECG-FM's own fine-tuning keeps its first convolution layers fixed.
+    if hasattr(teacher.encoder, "feature_grad_mult"):
+        teacher.encoder.feature_grad_mult = 0.0
+    teacher = teacher.to(device)
+    groups = [
+        {"params": list(teacher.encoder.parameters()), "lr": lr},
+        {"params": list(teacher.head.parameters()), "lr": head_lr},
+    ]
+    optimizer = torch.optim.AdamW([group for group in groups if group["params"]], weight_decay=0.01)
+    on_gpu = str(device).startswith("cuda")
+    use_bf16 = on_gpu and torch.cuda.is_bf16_supported()
+    loader = DataLoader(
+        train, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=on_gpu,
+        generator=torch.Generator().manual_seed(seed),
+    )
+    best_path, log_path = output_dir / "best.pt", output_dir / "log.csv"
+    history = []
+    for epoch in range(1, max_epochs + 1):
+        start, total = time.time(), 0.0
+        teacher.train()
+        for step, batch in enumerate(loader, start=1):
+            optimizer.zero_grad(set_to_none=True)
+            with torch.autocast(device_type="cuda" if on_gpu else "cpu", dtype=torch.bfloat16, enabled=use_bf16):
+                logits = teacher(batch["waveform"].to(device), batch["tabular"].to(device))
+            loss = masked_bce(logits.float(), batch["labels"].to(device), batch["label_mask"].to(device))
+            loss.backward()
+            optimizer.step()
+            total += loss.item()
+            if step % log_every == 0:
+                print(f"epoch {epoch} step {step}/{len(loader)} loss {total / step:.4f} "
+                      f"{time.time() - start:.0f}s", flush=True)
+        metrics = basic_metrics(predict(teacher, val, batch_size=batch_size, num_workers=num_workers, device=device))
+        row = {
+            "epoch": epoch, "train_loss": round(total / len(loader), 5),
+            "val_mean_auroc": round(mean_auroc(metrics), 5),
+            "val_shd_auroc": round(metrics[LABEL_COLUMNS[SHD_INDEX]]["auroc"], 5),
+            "seconds": round(time.time() - start, 1),
+        }
+        history.append(row)
+        with log_path.open("a", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(row))
+            if epoch == 1:
+                writer.writeheader()
+            writer.writerow(row)
+        print(f"epoch {epoch} done: {row}", flush=True)
+        best = max(range(len(history)), key=lambda i: (history[i]["val_mean_auroc"], i))
+        if best == len(history) - 1:
+            torch.save({"epoch": epoch, "state_dict": teacher.state_dict(), **row}, best_path)
+        elif len(history) - 1 - best >= patience:
+            break
+    return best_path
 
 
-def load_frozen_teacher(checkpoint: str | Path, *, device: str = "cpu") -> nn.Module:
+def restore_teacher(teacher: Teacher, checkpoint: str | Path) -> Teacher:
+    """Load a checkpoint written by train_teacher into a Teacher with the same layout."""
+    saved = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    teacher.load_state_dict(saved["state_dict"], strict=True)
+    return teacher
+
+
+def load_frozen_teacher(
+    checkpoint: str | Path, *, pretrained_path: str | Path = DEFAULT_PRETRAINED, device: str = "cpu",
+) -> nn.Module:
     """
     Load the finished Teacher, ready to run.
 
     Args:
         checkpoint: A file written by train_teacher.
+        pretrained_path: The ECG-FM checkpoint, which supplies the model layout.
         device: Where the model is placed.
 
     Returns:
         The model in evaluation mode, in the shared call format.
     """
-    raise NotImplementedError("Role B: restore the checkpoint saved by train_teacher")
+    teacher = restore_teacher(build_teacher(pretrained_path), checkpoint)
+    for parameter in teacher.parameters():
+        parameter.requires_grad_(False)
+    return teacher.to(device).eval()
