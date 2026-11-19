@@ -9,8 +9,8 @@ from scipy.interpolate import interp1d
 from compress_ecg.data import SHD_INDEX, EchoNextDataset
 from compress_ecg.profiling import synthetic_inputs
 from compress_ecg.teacher import (
-    Teacher, build_teacher, extract_features, fit_probe, masked_bce, mean_auroc,
-    restore_teacher, to_ecg_fm_input, train_teacher,
+    Teacher, TeacherHead, build_teacher, extract_features, fit_probe, masked_bce, mean_auroc,
+    patient_weights, restore_teacher, to_ecg_fm_input, train_teacher,
 )
 
 ECG_FM_CHECKPOINT = (
@@ -158,3 +158,52 @@ def test_training_refuses_a_folder_that_already_has_a_log(data_dir, tmp_path):
     (folder / "log.csv").write_text("epoch\n")
     with pytest.raises(FileExistsError, match="log.csv"):
         train_teacher(Teacher(FakeEncoder()), EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val"), folder)
+
+
+def test_patient_weights_follow_the_count_to_the_power_alpha():
+    keys = np.array(["a", "a", "a", "b"])
+    np.testing.assert_allclose(patient_weights(keys, 1.0), [1 / 3, 1 / 3, 1 / 3, 1.0])
+    np.testing.assert_allclose(patient_weights(keys, 0.5), [3 ** -0.5, 3 ** -0.5, 3 ** -0.5, 1.0])
+    np.testing.assert_allclose(patient_weights(keys, 0.0), [1.0, 1.0, 1.0, 1.0])
+
+
+def test_head_dropout_changes_outputs_only_in_training_mode():
+    features = torch.randn(32, 768)
+    head = TeacherHead(dropout=0.5)
+    head.train()
+    assert not torch.equal(head(features), head(features))
+    head.eval()
+    assert torch.equal(head(features), head(features))
+
+
+def test_head_without_dropout_is_the_same_in_training_mode():
+    features = torch.randn(32, 768)
+    head = TeacherHead().train()
+    assert torch.equal(head(features), head(features))
+
+
+def test_lead_masking_blanks_leads_in_training_mode_only():
+    torch.manual_seed(0)
+    teacher = Teacher(FakeEncoder(), lead_mask_prob=0.5)
+    waveform, tabular = synthetic_inputs(8)
+    teacher.eval()(waveform, tabular)
+    assert (teacher.encoder.windows.abs().amax(dim=-1) > 0).all()
+    teacher.train()(waveform, tabular)
+    blank = teacher.encoder.windows.abs().amax(dim=-1) == 0
+    assert blank.shape == (16, 12)
+    assert blank.any()
+    assert not blank.all(dim=1).any()
+
+
+def test_lead_masking_never_blanks_every_lead_of_an_ecg():
+    teacher = Teacher(FakeEncoder(), lead_mask_prob=1.0).train()
+    teacher(*synthetic_inputs(4))
+    assert (teacher.encoder.windows.abs().amax(dim=-1) > 0).all()
+
+
+def test_training_with_patient_balancing_saves_a_checkpoint(data_dir, tmp_path):
+    best = train_teacher(
+        Teacher(FakeEncoder(), head_dropout=0.3, lead_mask_prob=0.2), EchoNextDataset(data_dir, "train"),
+        EchoNextDataset(data_dir, "val"), tmp_path / "teacher", max_epochs=1, balance_patients=0.5,
+    )
+    assert best.is_file()

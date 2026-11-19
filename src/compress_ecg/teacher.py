@@ -24,7 +24,7 @@ import torch
 import torch.nn.functional as F
 from sklearn.metrics import roc_auc_score
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from .data import LABEL_COLUMNS, SHD_INDEX, EchoNextDataset
 from .predictions import basic_metrics, predict
@@ -76,11 +76,29 @@ def check_waveform(waveform: torch.Tensor) -> None:
         raise ValueError("Teacher expects waveform [batch,12,2500]")
 
 
+def patient_weights(patient_keys: np.ndarray, alpha: float) -> np.ndarray:
+    """
+    Weight each ECG by 1 over its patient's ECG count, raised to alpha.
+
+    Args:
+        patient_keys: The patient of every ECG, in dataset order.
+        alpha: 0 gives every ECG the same weight, and 1 gives every patient the same total weight.
+
+    Returns:
+        One float weight per ECG. Patients with many ECGs get less weight per ECG.
+    """
+    keys = np.asarray(patient_keys)
+    _, inverse, counts = np.unique(keys, return_inverse=True, return_counts=True)
+    return counts[inverse].astype(np.float64) ** -alpha
+
+
 class TeacherHead(nn.Module):
     """The new output layer, with an optional rescaling of ECG-FM's features in front of it."""
 
-    def __init__(self):
+    def __init__(self, dropout: float = 0.0):
         super().__init__()
+        # Active only in training mode. A value of 0 leaves the features untouched.
+        self.dropout = nn.Dropout(dropout)
         self.proj = nn.Linear(EMBED_DIM, len(LABEL_COLUMNS))
         # Same starting values as ECG-FM's own classification layer.
         nn.init.xavier_uniform_(self.proj.weight)
@@ -90,20 +108,27 @@ class TeacherHead(nn.Module):
         self.register_buffer("feature_std", torch.ones(EMBED_DIM))
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
-        return self.proj((features - self.feature_mean) / self.feature_std)
+        return self.proj(self.dropout((features - self.feature_mean) / self.feature_std))
 
 
 class Teacher(nn.Module):
     """ECG-FM plus a 12-output layer, in the shared call format."""
 
-    def __init__(self, encoder: nn.Module):
+    def __init__(self, encoder: nn.Module, *, head_dropout: float = 0.0, lead_mask_prob: float = 0.0):
         super().__init__()
         self.encoder = encoder
-        self.head = TeacherHead()
+        self.head = TeacherHead(head_dropout)
+        # In training mode only, each lead of each ECG is set to zero with this probability.
+        self.lead_mask_prob = lead_mask_prob
 
     def features(self, waveform: torch.Tensor) -> torch.Tensor:
         """Return ECG-FM's 768 averaged features for each ECG in waveform [batch, 12, 2500]."""
         check_waveform(waveform)
+        if self.training and self.lead_mask_prob > 0:
+            # ECG-FM was pretrained with random lead masking, so this input is familiar to it.
+            keep = torch.rand(waveform.shape[0], waveform.shape[1], 1, device=waveform.device) >= self.lead_mask_prob
+            keep = keep | ~keep.any(dim=1, keepdim=True)  # Never blank every lead of an ECG.
+            waveform = waveform * keep.to(waveform.dtype)
         windows = to_ecg_fm_input(waveform)
         steps = self.encoder.extract_features(windows, padding_mask=None, mask=False)["x"]
         # Averaging every time step of both windows matches ECG-FM's classifier for one window.
@@ -117,13 +142,17 @@ class Teacher(nn.Module):
         return self.head(self.features(waveform))
 
 
-def build_teacher(pretrained_path: str | Path, *, device: str = "cpu") -> nn.Module:
+def build_teacher(
+    pretrained_path: str | Path, *, device: str = "cpu", head_dropout: float = 0.0, lead_mask_prob: float = 0.0,
+) -> nn.Module:
     """
     Load ECG-FM and add a new output layer.
 
     Args:
         pretrained_path: The ECG-FM checkpoint from scripts/download_weights.sh.
         device: Where the model is placed.
+        head_dropout: Dropout on the 768 features before the output layer, in training only.
+        lead_mask_prob: Chance that each lead is blanked in an ECG, in training only.
 
     Returns:
         A model where model(waveform, tabular) returns logits [batch, 12]. It ignores tabular.
@@ -142,7 +171,7 @@ def build_teacher(pretrained_path: str | Path, *, device: str = "cpu") -> nn.Mod
     encoder = build_model_from_checkpoint(checkpoint_path=str(pretrained_path))
     # The quantizer and projection layers only served pretraining. Removing them leaves 90,374,016 parameters.
     encoder.remove_pretraining_modules()
-    return Teacher(encoder).to(device)
+    return Teacher(encoder, head_dropout=head_dropout, lead_mask_prob=lead_mask_prob).to(device)
 
 
 @torch.inference_mode()
@@ -242,7 +271,7 @@ def train_teacher(
     teacher: nn.Module, train: EchoNextDataset, val: EchoNextDataset, output_dir: str | Path,
     *, device: str = "cpu", seed: int = 42, probe_head: str | Path | None = None,
     lr: float = 1e-5, head_lr: float = 1e-4, batch_size: int = 32, max_epochs: int = 10,
-    patience: int = 2, num_workers: int = 0, log_every: int = 200,
+    patience: int = 2, num_workers: int = 0, log_every: int = 200, balance_patients: float = 0.0,
 ) -> Path:
     """
     Fine-tune the Teacher and save the best checkpoint.
@@ -262,6 +291,8 @@ def train_teacher(
         patience: Epochs without a better Validation mean AUROC before stopping.
         num_workers: Data loader workers.
         log_every: Steps between progress lines.
+        balance_patients: Exponent for patient_weights. Above 0, each epoch draws ECGs with those
+            weights, so patients with many ECGs are seen less often per ECG. 0 shuffles as usual.
 
     Returns:
         The path of the best checkpoint, chosen by the mean AUROC over all 12 outputs.
@@ -291,9 +322,16 @@ def train_teacher(
     optimizer = torch.optim.AdamW([group for group in groups if group["params"]], weight_decay=0.01)
     on_gpu = str(device).startswith("cuda")
     use_bf16 = on_gpu and torch.cuda.is_bf16_supported()
+    sampler = None
+    if balance_patients > 0:
+        weights = patient_weights(train.selected_metadata["patient_key"].to_numpy(), balance_patients)
+        sampler = WeightedRandomSampler(
+            torch.from_numpy(weights), num_samples=len(train), replacement=True,
+            generator=torch.Generator().manual_seed(seed),
+        )
     loader = DataLoader(
-        train, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=on_gpu,
-        generator=torch.Generator().manual_seed(seed),
+        train, batch_size=batch_size, shuffle=sampler is None, sampler=sampler, num_workers=num_workers,
+        pin_memory=on_gpu, generator=torch.Generator().manual_seed(seed),
     )
     best_path, log_path = output_dir / "best.pt", output_dir / "log.csv"
     history = []
