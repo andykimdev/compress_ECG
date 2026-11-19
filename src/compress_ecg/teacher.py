@@ -266,6 +266,9 @@ def train_teacher(
     Returns:
         The path of the best checkpoint, chosen by the mean AUROC over all 12 outputs.
 
+    Raises:
+        FileExistsError: When output_dir already holds a log from an earlier run.
+
     Notes:
         Writes best.pt and log.csv, with one row per epoch, to output_dir. On a GPU that
         supports it, the forward pass runs in bfloat16 mixed precision.
@@ -273,6 +276,8 @@ def train_teacher(
     torch.manual_seed(seed)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    if (output_dir / "log.csv").exists():
+        raise FileExistsError(f"{output_dir / 'log.csv'} already exists. Choose a new output folder for each run")
     if probe_head is not None:
         teacher.head.load_state_dict(torch.load(probe_head, map_location="cpu", weights_only=True))
     # ECG-FM's own fine-tuning keeps its first convolution layers fixed.

@@ -150,3 +150,11 @@ def test_restored_teacher_gives_the_same_logits(data_dir, tmp_path):
     restored = restore_teacher(Teacher(FakeEncoder()), best).eval()
     inputs = synthetic_inputs(2)
     torch.testing.assert_close(restored(*inputs), trained.eval()(*inputs))
+
+
+def test_training_refuses_a_folder_that_already_has_a_log(data_dir, tmp_path):
+    folder = tmp_path / "teacher"
+    folder.mkdir()
+    (folder / "log.csv").write_text("epoch\n")
+    with pytest.raises(FileExistsError, match="log.csv"):
+        train_teacher(Teacher(FakeEncoder()), EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val"), folder)
