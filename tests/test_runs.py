@@ -88,3 +88,16 @@ def test_table_shows_the_weight_averaging_settings(data_dir, tmp_path):
     assert table[["run_id", "ema_decay", "evals_per_epoch", "select_by"]].to_dict("records") == [
         {"run_id": "a", "ema_decay": 0.999, "evals_per_epoch": 4, "select_by": "shd"},
     ]
+
+
+def test_table_says_which_ecgs_each_run_was_scored_on(data_dir, tmp_path):
+    scores = {"val_mean_auroc": 0.8, "val_shd_auroc": 0.8}
+    rates = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42}
+    make_run(tmp_path, "pilot", {**rates, "holdout_fraction": 0.2}, {**scores, "scored_on": "dev"}, data_dir)
+    make_run(tmp_path, "final", {**rates, "holdout_fraction": 0.0}, {**scores, "scored_on": "val"}, data_dir)
+    # A run from before the holdout option has neither entry. It was scored on Validation.
+    make_run(tmp_path, "older", rates, scores, data_dir)
+    make_run(tmp_path, "unfinished", rates, None, data_dir)
+    table = collect_runs(tmp_path).set_index("run_id")
+    assert table["scored_on"].to_dict() == {"pilot": "dev", "final": "val", "older": "val", "unfinished": None}
+    assert table.loc[["pilot", "final"], "holdout_fraction"].to_dict() == {"pilot": 0.2, "final": 0.0}

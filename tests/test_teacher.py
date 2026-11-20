@@ -10,9 +10,9 @@ from scipy.interpolate import interp1d
 from compress_ecg.data import LABEL_COLUMNS, SHD_INDEX, EchoNextDataset
 from compress_ecg.profiling import synthetic_inputs
 from compress_ecg.teacher import (
-    Teacher, TeacherHead, average_checkpoints, build_teacher, ema_decay_at, ema_update, evaluation_steps,
-    extract_features, fit_probe, load_frozen_teacher, masked_bce, mean_auroc, patient_weights, restore_teacher,
-    to_ecg_fm_input, train_teacher,
+    Teacher, TeacherHead, average_checkpoints, build_teacher, check_probe_head, ema_decay_at, ema_update,
+    evaluation_steps, extract_features, fit_probe, load_frozen_teacher, masked_bce, mean_auroc, patient_weights,
+    restore_teacher, to_ecg_fm_input, train_teacher,
 )
 
 ECG_FM_CHECKPOINT = (
@@ -348,7 +348,8 @@ def test_patience_counts_scorings_so_training_can_stop_inside_an_epoch(data_dir,
     assert len(scores) < 18
 
 
-def test_select_by_shd_saves_the_scoring_with_the_best_shd_auroc(data_dir, tmp_path):
+@pytest.mark.parametrize("select_by, other", [("shd", "mean"), ("mean", "shd")])
+def test_checkpoint_is_the_scoring_with_the_best_score_of_the_chosen_kind(select_by, other, data_dir, tmp_path):
     # Give SHD its own Validation labels, so its score moves apart from the 12-output mean.
     metadata_path = data_dir / "EchoNext_metadata_100k.csv"
     metadata = pd.read_csv(metadata_path)
@@ -358,16 +359,17 @@ def test_select_by_shd_saves_the_scoring_with_the_best_shd_auroc(data_dir, tmp_p
     torch.manual_seed(0)
     train, val = EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val")
     best = train_teacher(
-        Teacher(FakeEncoder()), train, val, tmp_path / "t", head_lr=5.0, max_epochs=6, patience=10, select_by="shd",
+        Teacher(FakeEncoder()), train, val, tmp_path / "t", head_lr=5.0, max_epochs=6, patience=10,
+        select_by=select_by,
     )
     log = read_log(tmp_path / "t")
-    shd = [float(row["val_shd_auroc"]) for row in log]
-    mean = [float(row["val_mean_auroc"]) for row in log]
-    assert len(shd) == 6
-    by_shd = max(range(6), key=lambda i: (shd[i], i)) + 1
+    assert len(log) == 6
+    best_epoch = {
+        kind: max(range(6), key=lambda i: (float(log[i][f"val_{kind}_auroc"]), i)) + 1 for kind in ("shd", "mean")
+    }
     # The two rules must disagree here, or this test could not tell them apart.
-    assert by_shd != max(range(6), key=lambda i: (mean[i], i)) + 1
-    assert torch.load(best, weights_only=True)["epoch"] == by_shd
+    assert best_epoch[select_by] != best_epoch[other]
+    assert torch.load(best, weights_only=True)["epoch"] == best_epoch[select_by]
 
 
 @pytest.mark.parametrize("setting, value", [
@@ -472,3 +474,40 @@ def test_averaged_checkpoint_loads_as_a_frozen_teacher(use_tabular, tmp_path, mo
     expected = (teachers[0](*inputs) + teachers[1](*inputs)) / 2
     torch.testing.assert_close(frozen(*inputs), expected, atol=1e-5, rtol=1e-5)
     assert (frozen.tabular_head is not None) == use_tabular
+
+
+def touch(path: Path) -> Path:
+    """Create an empty file and its folder, and return the path."""
+    path.parent.mkdir(parents=True)
+    path.touch()
+    return path
+
+
+def test_run_without_a_probe_head_needs_no_check():
+    check_probe_head(None, holdout_fraction=0.2, holdout_seed=0)
+
+
+@pytest.mark.parametrize("folder", ["probe", "probe_ho0.2_hs1", "probe_ho0.3_hs0", "probe_ho0.2_hs0_old"])
+def test_holdout_run_rejects_a_probe_head_from_another_folder(tmp_path, folder):
+    head = touch(tmp_path / folder / "rescaled_lr0.001.pt")
+    message = r"ends with _ho0\.2_hs0.*run_teacher_probe\.py --holdout-fraction 0\.2 --holdout-seed 0"
+    with pytest.raises(ValueError, match=message):
+        check_probe_head(head, holdout_fraction=0.2, holdout_seed=0)
+
+
+def test_holdout_run_accepts_the_probe_head_of_its_own_holdout(tmp_path):
+    check_probe_head(touch(tmp_path / "probe_ho0.2_hs0" / "rescaled_lr0.001.pt"), holdout_fraction=0.2, holdout_seed=0)
+
+
+def test_missing_holdout_probe_head_names_the_command_that_builds_it(tmp_path):
+    with pytest.raises(FileNotFoundError, match=r"run_teacher_probe\.py --holdout-fraction 0\.2 --holdout-seed 0"):
+        check_probe_head(tmp_path / "probe_ho0.2_hs0" / "rescaled_lr0.001.pt", holdout_fraction=0.2, holdout_seed=0)
+
+
+def test_missing_whole_split_probe_head_names_the_plain_command(tmp_path):
+    with pytest.raises(FileNotFoundError, match=r"run_teacher_probe\.py$"):
+        check_probe_head(tmp_path / "probe" / "rescaled_lr0.001.pt")
+
+
+def test_run_without_a_holdout_accepts_any_existing_probe_head(tmp_path):
+    check_probe_head(touch(tmp_path / "probe" / "rescaled_lr0.001.pt"))

@@ -1,3 +1,6 @@
+import importlib.util
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -38,3 +41,33 @@ def data_dir(tmp_path):
         np.save(root / f"EchoNext_{split}_waveforms.npy", waveforms)
         np.save(root / f"EchoNext_{split}_tabular_features.npy", tabular)
     return root
+
+
+@pytest.fixture
+def holdout_dir(data_dir):
+    """
+    The small dataset with 6 Training ECGs from 4 patients and a most recent ECG flag.
+
+    Training rows sit at CSV rows 1, 5, 9, 13, 17, 21 and belong to patients a, b, b, c, c, d.
+    The last ECG of each patient is flagged, as is every Validation and Test ECG.
+    """
+    path = data_dir / "EchoNext_metadata_100k.csv"
+    meta = pd.read_csv(path)
+    train_rows = meta.index[meta["split"].eq("train")]
+    meta.loc[train_rows, "patient_key"] = ["a", "b", "b", "c", "c", "d"]
+    meta["most_recent_ecg"] = meta["split"].isin(["val", "test"]).astype(int)
+    meta.loc[train_rows, "most_recent_ecg"] = [1, 0, 1, 0, 1, 1]
+    meta.to_csv(path, index=False)
+    return data_dir
+
+
+@pytest.fixture
+def load_script():
+    """Return a function that loads a file from scripts/ as a module, without running its main."""
+    def load(name: str):
+        path = Path(__file__).resolve().parents[1] / "scripts" / f"{name}.py"
+        spec = importlib.util.spec_from_file_location(f"{name}_script", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    return load

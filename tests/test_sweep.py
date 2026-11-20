@@ -151,3 +151,52 @@ def test_ema_config_gives_six_seeds_with_unique_names():
     names = [run_id_for(run) for run in expand_runs(config)]
     assert names == [f"lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd_s{seed}" for seed in (42, 43, 44, 45, 46, 47)]
     assert config["max_parallel"] == 6
+
+
+def test_run_id_tags_a_run_that_holds_patients_out():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "holdout_fraction": 0.2, "holdout_seed": 0}
+    assert run_id_for(settings) == "lr1e-05_hlr0.0001_ho0.2_s42"
+
+
+def test_run_id_tags_a_holdout_seed_other_than_zero():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "holdout_fraction": 0.2, "holdout_seed": 3}
+    assert run_id_for(settings) == "lr1e-05_hlr0.0001_ho0.2_hs3_s42"
+
+
+def test_run_id_has_no_tag_without_a_holdout():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "holdout_fraction": 0.0, "holdout_seed": 0}
+    assert run_id_for(settings) == "lr1e-05_hlr0.0001_s42"
+
+
+def test_command_of_a_holdout_run_scores_dev_and_passes_the_holdout():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "holdout_fraction": 0.2, "holdout_seed": 0}
+    command = build_command(settings, run_id="r1", runs_root="runs/sweep", python="py")
+    assert command[2:] == [
+        "--device", "cuda", "--run-id", "r1", "--runs-root", "runs/sweep/r1", "--score-splits", "dev",
+        "--lr", "1e-05", "--head-lr", "0.0001", "--seed", "42", "--holdout-fraction", "0.2", "--holdout-seed", "0",
+    ]
+
+
+def test_command_with_a_holdout_fraction_of_zero_scores_validation():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "holdout_fraction": 0.0}
+    command = build_command(settings, run_id="r1", runs_root="runs/sweep", python="py")
+    assert command[8:10] == ["--score-splits", "val"]
+
+
+def test_holdout_config_gives_three_pilot_seeds_that_score_dev():
+    config = json.loads((Path(__file__).resolve().parents[1] / "configs" / "teacher_holdout.json").read_text())
+    runs = expand_runs(config)
+    names = [run_id_for(run) for run in runs]
+    assert names == [f"lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd_ho0.2_s{seed}" for seed in (42, 43, 44)]
+    assert config["max_parallel"] == 3
+    commands = [build_command(run, run_id=name, runs_root="runs/sweep", python="py") for run, name in zip(runs, names)]
+    assert [command[8:10] for command in commands] == [["--score-splits", "dev"]] * 3
+
+
+def test_holdout_config_differs_from_the_ema_config_only_by_the_holdout_and_its_probe_head():
+    folder = Path(__file__).resolve().parents[1] / "configs"
+    holdout = json.loads((folder / "teacher_holdout.json").read_text())["base"]
+    ema = json.loads((folder / "teacher_ema.json").read_text())["base"]
+    # The output layer comes from the probe of the same holdout, which never saw the held-out patients.
+    holdout_head = "checkpoints/teacher/probe_ho0.2_hs0/rescaled_lr0.001.pt"
+    assert holdout == {**ema, "holdout_fraction": 0.2, "holdout_seed": 0, "probe_head": holdout_head}

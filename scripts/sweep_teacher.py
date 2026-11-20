@@ -10,6 +10,7 @@ from pathlib import Path
 
 from compress_ecg.runs import CONFIG_NAME, collect_runs, round_scores
 from compress_ecg.sweep import build_command, expand_runs, free_gpu_indices, run_id_for
+from compress_ecg.teacher import check_probe_head
 
 RUNS_DIR = Path("checkpoints/teacher/runs")
 
@@ -28,7 +29,21 @@ def read_gpus() -> tuple[list[dict], set[str]]:
     return gpus, {line.strip() for line in apps.splitlines() if line.strip()}
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    """
+    Plan the runs of a sweep config and start them on idle GPUs.
+
+    Args:
+        argv: Command line arguments without the program name. None reads them from sys.argv.
+
+    Raises:
+        ValueError: When a run holds patients out but would start from an output layer that
+            was fitted on them.
+        FileNotFoundError: When a run's starting output layer does not exist.
+
+    Notes:
+        Every pending run is checked before anything starts, in a dry run too.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/teacher_sweep.json")
     parser.add_argument("--runs-root", default="runs/sweep", help="Prediction files, one folder per run")
@@ -38,7 +53,7 @@ def main() -> None:
     parser.add_argument("--poll-seconds", type=int, default=15)
     parser.add_argument("--give-up-minutes", type=int, default=120, help="Stop if no GPU frees up for this long")
     parser.add_argument("--dry-run", action="store_true", help="Print the plan and the idle GPUs, and start nothing")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     config = json.loads(Path(args.config).read_text())
     max_parallel = args.max_parallel or config.get("max_parallel", 1)
@@ -49,6 +64,10 @@ def main() -> None:
             print(f"skip {run_id}: already recorded in {RUNS_DIR / run_id}")
         else:
             pending.append(settings)
+    for settings in pending:
+        check_probe_head(
+            settings.get("probe_head"), settings.get("holdout_fraction", 0.0), settings.get("holdout_seed", 0),
+        )
     print(f"{len(pending)} runs, at most {max_parallel} at a time")
     if args.dry_run:
         for settings in pending:

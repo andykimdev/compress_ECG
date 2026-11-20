@@ -24,11 +24,13 @@ FLAGS = {
     "lead_mask_prob": "--lead-mask-prob", "balance_patients": "--balance-patients",
     "use_tabular": "--use-tabular", "tabular_lr": "--tabular-lr", "ema_decay": "--ema-decay",
     "evals_per_epoch": "--evals-per-epoch", "select_by": "--select-by",
+    "holdout_fraction": "--holdout-fraction", "holdout_seed": "--holdout-seed",
 }
 # Settings that change the result, and the short tag each adds to a run name when it is on.
 NAME_TAGS = (
     ("head_dropout", "do"), ("lead_mask_prob", "lm"), ("balance_patients", "bp"), ("use_tabular", "tab"),
-    ("ema_decay", "ema"), ("evals_per_epoch", "ev"), ("select_by", "by"),
+    ("ema_decay", "ema"), ("evals_per_epoch", "ev"), ("select_by", "by"), ("holdout_fraction", "ho"),
+    ("holdout_seed", "hs"),
 )
 # Settings whose off value is not 0 or False. A setting at its off value adds no tag.
 OFF_VALUES = {"evals_per_epoch": 1, "select_by": "mean"}
@@ -101,11 +103,14 @@ def build_command(settings: dict, *, run_id: str, runs_root: str, python: str = 
         python: Interpreter that runs the script.
 
     Returns:
-        The argument list for subprocess. Only the Validation ECGs are scored, to save time.
+        The argument list for subprocess. To save time only one group of ECGs is scored: the
+        Validation ECGs, or the dev part of the Training ECGs when the run holds patients out.
     """
     script = Path(__file__).resolve().parents[2] / "scripts" / "run_teacher.py"
+    # A run that holds patients out is a pilot. It must not read Validation.
+    scored = "dev" if settings.get("holdout_fraction") else "val"
     command = [python, str(script), "--device", "cuda", "--run-id", run_id,
-               "--runs-root", f"{runs_root}/{run_id}", "--score-splits", "val"]
+               "--runs-root", f"{runs_root}/{run_id}", "--score-splits", scored]
     for name, flag in FLAGS.items():
         value = settings.get(name)
         if isinstance(value, bool):

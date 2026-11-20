@@ -34,7 +34,7 @@ RESULT_NAME = "result.json"
 # Settings shown as table columns. Every setting stays in config.json.
 TABLE_SETTINGS = (
     "lr", "head_lr", "head_dropout", "lead_mask_prob", "balance_patients", "use_tabular", "ema_decay",
-    "evals_per_epoch", "select_by", "seed", "batch_size", "max_epochs", "patience",
+    "evals_per_epoch", "select_by", "holdout_fraction", "seed", "batch_size", "max_epochs", "patience",
 )
 
 
@@ -123,6 +123,8 @@ def collect_runs(root: str | Path) -> pd.DataFrame:
 
     Returns:
         One row per run with its settings, code version, status, and aggregate scores.
+        scored_on says which ECGs the scores came from: val, or dev for a run that held
+        Training patients out, whose scores must not be compared with Validation scores.
         Runs without a result.json have status incomplete. Rows are sorted by Validation
         mean AUROC, best first, with incomplete runs last.
     """
@@ -140,6 +142,8 @@ def collect_runs(root: str | Path) -> pd.DataFrame:
             "gpu": config["machine"]["gpu"],
             "best_epoch": result.get("best_epoch"),
             "epochs_run": result.get("epochs_run"),
+            # A finished run without this entry is older than the holdout option, so it used Validation.
+            "scored_on": result.get("scored_on", "val") if result else None,
             "val_mean_auroc": result.get("val_mean_auroc"),
             "val_shd_auroc": result.get("val_shd_auroc"),
             "minutes": result.get("minutes"),

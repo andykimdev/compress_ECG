@@ -30,7 +30,7 @@ from sklearn.metrics import roc_auc_score
 from torch import nn
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-from .data import LABEL_COLUMNS, SHD_INDEX, TABULAR_COLUMNS, EchoNextDataset
+from .data import LABEL_COLUMNS, SHD_INDEX, TABULAR_COLUMNS, EchoNextDataset, holdout_tag
 from .predictions import basic_metrics, predict
 
 DEFAULT_PRETRAINED = (
@@ -247,8 +247,10 @@ def fit_probe(
     Train only the output layer on saved ECG-FM features, keeping the best epoch.
 
     Args:
-        train: Output of extract_features on the Training ECGs.
-        val: Output of extract_features on the Validation ECGs, used to pick the epoch.
+        train: Output of extract_features on the ECGs that fit the layer: the Training ECGs,
+            or their fit part when patients are held out.
+        val: Output of extract_features on the ECGs that pick the epoch: the Validation ECGs,
+            or the dev part of the Training ECGs when patients are held out.
         rescale: Whether to scale each feature to mean 0 and spread 1, using Training values.
         lr: Adam learning rate.
         max_epochs: Upper limit on passes over the Training ECGs.
@@ -284,6 +286,35 @@ def fit_probe(
             break
     head.load_state_dict(best_state)
     return head, history
+
+
+def check_probe_head(probe_head: str | Path | None, holdout_fraction: float = 0.0, holdout_seed: int = 0) -> None:
+    """
+    Check that a starting output layer exists and was fitted without the held-out patients.
+
+    Args:
+        probe_head: File saved by scripts/run_teacher_probe.py, or None for a run without one.
+        holdout_fraction: Share of the Training patients the run holds out. 0 means none.
+        holdout_seed: Seed of the held-out draw.
+
+    Raises:
+        ValueError: When the run holds patients out but the file is not in a folder named for
+            that holdout, such as probe_ho0.2_hs0. A layer fitted on every Training patient
+            has seen the held-out ones, so the run's dev scores would be too high.
+        FileNotFoundError: When the file does not exist.
+    """
+    if probe_head is None:
+        return
+    path, tag = Path(probe_head), holdout_tag(holdout_fraction, holdout_seed)
+    flags = f" --holdout-fraction {holdout_fraction:g} --holdout-seed {holdout_seed}" if tag else ""
+    build = f"Build it with: python scripts/run_teacher_probe.py{flags}"
+    if tag and not path.parent.name.endswith(tag):
+        raise ValueError(
+            f"A run that holds patients out needs an output layer fitted without them, from a folder "
+            f"whose name ends with {tag}. {path} is not in one. {build}"
+        )
+    if not path.is_file():
+        raise FileNotFoundError(f"No output layer at {path}. {build}")
 
 
 def mean_auroc(metrics: dict) -> float:
@@ -399,7 +430,9 @@ def train_teacher(
     Args:
         teacher: Output of build_teacher.
         train: The Training ECGs.
-        val: The Validation ECGs, used for early stopping and tuning.
+        val: The ECGs that pick the checkpoint and stop training early. These are the
+            Validation ECGs, or for a pilot run the dev part of the Training ECGs. The log
+            columns are named val_ in both cases.
         output_dir: Folder for checkpoints. Never choose settings using Test ECGs.
         device: Where training runs.
         seed: Random seed.
