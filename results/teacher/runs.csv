@@ -1,10 +1,22 @@
-run_id,status,lr,head_lr,seed,batch_size,max_epochs,patience,commit,dirty,gpu,best_epoch,epochs_run,val_mean_auroc,val_shd_auroc,minutes,checkpoint_sha256
-lr3e-05_hlr0.0001_s42,finished,3e-05,0.0001,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8197,0.8312,8.1,266b65016067
-lr1e-05_hlr0.0001_s43,finished,1e-05,0.0001,43,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8188,0.8367,8.2,39d494ceff08
-lr1e-05_hlr0.001_s42,finished,1e-05,0.001,42,64,20,2,18ce3c3,False,NVIDIA A100 80GB PCIe,1,3,0.8186,0.8331,9.7,ad669fabe0c3
-lr3e-05_hlr0.001_s42,finished,3e-05,0.001,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8157,0.8297,8.2,ebfe2a931dc4
-lr1e-05_hlr0.0001_s42,finished,1e-05,0.0001,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8152,0.8316,8.2,8675f8ecbaa9
-lr3e-06_hlr0.0001_s42,finished,3e-06,0.0001,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8147,0.8291,8.2,a5c2eab52c3c
-lr3e-06_hlr0.001_s42,finished,3e-06,0.001,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8138,0.8337,8.1,9c919f081ade
-lr1e-06_hlr0.0001_s42,finished,1e-06,0.0001,42,64,20,2,18ce3c3,False,NVIDIA A100 80GB PCIe,3,5,0.8116,0.8392,15.8,f72d1d893406
-lr1e-06_hlr0.001_s42,finished,1e-06,0.001,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8049,0.8298,8.2,24d6d73b3712
+run_id,status,lr,head_lr,head_dropout,lead_mask_prob,balance_patients,seed,batch_size,max_epochs,patience,commit,dirty,gpu,best_epoch,epochs_run,val_mean_auroc,val_shd_auroc,minutes,checkpoint_sha256
+lr1e-05_hlr0.0001_do0.3_lm0.2_bp0.5_s42,finished,1e-05,0.0001,0.3,0.2,0.5,42,64,20,2,677f7d2,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,3,5,0.8308,0.8428,10.1,8329766bfc86
+lr1e-05_hlr0.0001_do0.7_s43,finished,1e-05,0.0001,0.7,0.0,0.0,43,64,20,2,677f7d2,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8303,0.8459,8.1,bcc2d8fdd579
+lr1e-05_hlr0.0001_do0.5_s43,finished,1e-05,0.0001,0.5,0.0,0.0,43,64,20,2,677f7d2,False,NVIDIA A100 80GB PCIe,2,4,0.83,0.8474,12.7,d184868b01d8
+lr1e-05_hlr0.0001_do0.3_lm0.2_bp0.5_s43,finished,1e-05,0.0001,0.3,0.2,0.5,43,64,20,2,677f7d2,False,NVIDIA A100 80GB PCIe,1,3,0.8295,0.8441,9.5,225d3c3ce9e6
+lr1e-05_hlr0.0001_do0.5_s42,finished,1e-05,0.0001,0.5,0.0,0.0,42,64,20,2,677f7d2,False,NVIDIA A100 80GB PCIe,1,3,0.8289,0.8459,9.5,2a81f43d547c
+lr1e-05_hlr0.0001_do0.3_s43,finished,1e-05,0.0001,0.3,0.0,0.0,43,64,20,2,677f7d2,False,NVIDIA A100 80GB PCIe,2,4,0.8285,0.8448,12.8,f54799087dfa
+lr1e-05_hlr0.0001_do0.7_s42,finished,1e-05,0.0001,0.7,0.0,0.0,42,64,20,2,677f7d2,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.828,0.8439,8.1,213f9d7ad636
+lr1e-05_hlr0.0001_do0.3_s42,finished,1e-05,0.0001,0.3,0.0,0.0,42,64,20,2,677f7d2,False,NVIDIA A100 80GB PCIe,1,3,0.8268,0.8442,9.5,4283d822b769
+lr3e-05_hlr0.0001_s42,finished,3e-05,0.0001,,,,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8197,0.8312,8.1,266b65016067
+lr1e-05_hlr0.0001_bp0.5_s42,finished,1e-05,0.0001,0.0,0.0,0.5,42,64,20,2,677f7d2,False,NVIDIA A100 80GB PCIe,2,4,0.8195,0.835,12.5,994befe0bdf2
+lr1e-05_hlr0.0001_bp0.5_s43,finished,1e-05,0.0001,0.0,0.0,0.5,43,64,20,2,677f7d2,False,NVIDIA A100 80GB PCIe,2,4,0.819,0.8357,12.8,1560039f053c
+lr1e-05_hlr0.0001_s43,finished,1e-05,0.0001,,,,43,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8188,0.8367,8.2,39d494ceff08
+lr1e-05_hlr0.001_s42,finished,1e-05,0.001,,,,42,64,20,2,18ce3c3,False,NVIDIA A100 80GB PCIe,1,3,0.8186,0.8331,9.7,ad669fabe0c3
+lr1e-05_hlr0.0001_lm0.2_s43,finished,1e-05,0.0001,0.0,0.2,0.0,43,64,20,2,677f7d2,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8182,0.8382,8.1,565a008b6709
+lr3e-05_hlr0.001_s42,finished,3e-05,0.001,,,,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8157,0.8297,8.2,ebfe2a931dc4
+lr1e-05_hlr0.0001_lm0.2_s42,finished,1e-05,0.0001,0.0,0.2,0.0,42,64,20,2,677f7d2,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8156,0.8315,8.1,d45c4df2cc12
+lr1e-05_hlr0.0001_s42,finished,1e-05,0.0001,,,,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8152,0.8316,8.2,8675f8ecbaa9
+lr3e-06_hlr0.0001_s42,finished,3e-06,0.0001,,,,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8147,0.8291,8.2,a5c2eab52c3c
+lr3e-06_hlr0.001_s42,finished,3e-06,0.001,,,,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8138,0.8337,8.1,9c919f081ade
+lr1e-06_hlr0.0001_s42,finished,1e-06,0.0001,,,,42,64,20,2,18ce3c3,False,NVIDIA A100 80GB PCIe,3,5,0.8116,0.8392,15.8,f72d1d893406
+lr1e-06_hlr0.001_s42,finished,1e-06,0.001,,,,42,64,20,2,18ce3c3,False,NVIDIA RTX PRO 6000 Blackwell Server Edition,2,4,0.8049,0.8298,8.2,24d6d73b3712
