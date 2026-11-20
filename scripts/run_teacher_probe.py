@@ -10,6 +10,8 @@ Purpose:
 Special Notes:
 - Install first: pip install -e .
 - Outputs of a holdout carry its tag, such as checkpoints/teacher/probe_ho0.2_hs0.
+- With --patient-fraction the layer is fitted on a share of the fit patients, and the outputs
+  carry that tag too, such as probe_ho0.2_hs0_pf0.125_ps0.
 """
 
 import argparse
@@ -20,7 +22,7 @@ import pandas as pd
 import torch
 
 from compress_ecg.baseline import load_mini
-from compress_ecg.data import LABEL_COLUMNS, PARTS, SHD_INDEX, holdout_tag, open_group
+from compress_ecg.data import LABEL_COLUMNS, SHD_INDEX, holdout_tag, open_group, subsample_tag
 from compress_ecg.predictions import basic_metrics, predict
 from compress_ecg.teacher import build_teacher, extract_features, fit_probe
 
@@ -70,6 +72,10 @@ def main(argv: list[str] | None = None) -> None:
                              "then fitted on the other patients and its epoch is picked on the most recent ECG of "
                              "each held-out patient (dev), and Validation is not read. 0 is off")
     parser.add_argument("--holdout-seed", type=int, default=0, help="Seed of the draw of held-out patients")
+    parser.add_argument("--patient-fraction", type=float, default=1.0,
+                        help="Fit the layer on only this share of the patients that are not held out, as "
+                             "run_teacher.py does for a learning curve. Needs --holdout-fraction. 1 is all of them")
+    parser.add_argument("--patient-seed", type=int, default=0, help="Seed of the draw of kept patients")
     parser.add_argument("--limit", type=int, help="Use only this many ECGs per split, for a quick check")
     parser.add_argument("--learning-rates", type=float, nargs="+", default=[1e-4, 1e-3, 1e-2])
     parser.add_argument("--batch-size", type=int, default=32)
@@ -78,7 +84,15 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if not 0 <= args.holdout_fraction < 1:
         parser.error("--holdout-fraction must be at least 0 and below 1")
-    tag = holdout_tag(args.holdout_fraction, args.holdout_seed)
+    if not 0 < args.patient_fraction <= 1:
+        parser.error("--patient-fraction must be above 0 and at most 1")
+    if args.patient_fraction != 1 and not args.holdout_fraction:
+        parser.error("--patient-fraction below 1 needs --holdout-fraction above 0")
+    holdout = holdout_tag(args.holdout_fraction, args.holdout_seed)
+    # Every output depends on the patients the layer was fitted on, so it carries both tags.
+    tag = holdout + subsample_tag(args.patient_fraction, args.patient_seed)
+    # Feature files are named for the ECGs they hold. Only fit changes with the share of patients.
+    feature_tags = {"fit": tag, "dev": holdout}
     # The ECGs that fit the layer, the ECGs that pick its epoch, and the name printed for those.
     fitted_on, picked_on, picked_name = ("fit", "dev", "dev") if tag else ("train", "val", "Validation")
     # The tag keeps a holdout's files apart from those of the probe on the whole split.
@@ -91,13 +105,13 @@ def main(argv: list[str] | None = None) -> None:
     datasets = {
         name: open_group(
             args.data_dir, name, limit=args.limit, holdout_fraction=args.holdout_fraction,
-            holdout_seed=args.holdout_seed,
+            holdout_seed=args.holdout_seed, patient_fraction=args.patient_fraction, patient_seed=args.patient_seed,
         )
         for name in (fitted_on, picked_on)
     }
     features = {
         name: load_or_extract(
-            teacher, dataset, Path(args.features_dir) / f"{name}{tag if name in PARTS else ''}{suffix}.npz", args,
+            teacher, dataset, Path(args.features_dir) / f"{name}{feature_tags.get(name, '')}{suffix}.npz", args,
         )
         for name, dataset in datasets.items()
     }

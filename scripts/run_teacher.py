@@ -67,7 +67,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--checkpoint", help="Score this saved Teacher and skip training")
     parser.add_argument("--probe-head",
                         help="Output layer from run_teacher_probe.py to start from. With a holdout it must come "
-                             "from a probe run with the same holdout, in a folder such as probe_ho0.2_hs0")
+                             "from a probe run with the same holdout and the same share of patients, in a folder "
+                             "such as probe_ho0.2_hs0 or probe_ho0.2_hs0_pf0.125_ps0")
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate for ECG-FM")
     parser.add_argument("--head-lr", type=float, default=1e-4, help="Learning rate for the output layer")
     parser.add_argument("--head-dropout", type=float, default=0.0, help="Dropout before the output layer")
@@ -93,6 +94,12 @@ def main(argv: list[str] | None = None) -> None:
                              "not read unless --score-splits names it. The log keeps its val_ column names, "
                              "and result.json says scored_on dev. 0 is off")
     parser.add_argument("--holdout-seed", type=int, default=0, help="Seed of the draw of held-out patients")
+    parser.add_argument("--patient-fraction", type=float, default=1.0,
+                        help="Train on only this share of the patients that are not held out, for one point of "
+                             "a learning curve. Needs --holdout-fraction. The share is taken separately among "
+                             "patients with and without SHD, and dev is scored whole. 1 is all of them")
+    parser.add_argument("--patient-seed", type=int, default=0,
+                        help="Seed of the draw of kept patients. With one seed a smaller share lies inside a larger")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--max-epochs", type=int, default=10)
@@ -104,7 +111,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if not 0 <= args.holdout_fraction < 1:
         parser.error("--holdout-fraction must be at least 0 and below 1")
+    if not 0 < args.patient_fraction <= 1:
+        parser.error("--patient-fraction must be above 0 and at most 1")
     holdout = args.holdout_fraction > 0
+    if args.patient_fraction != 1 and not holdout:
+        parser.error("--patient-fraction below 1 needs --holdout-fraction above 0")
     if args.score_splits is None:
         args.score_splits = ["dev"] if holdout else ["train", "val"]
     if "dev" in args.score_splits and not holdout:
@@ -119,13 +130,15 @@ def main(argv: list[str] | None = None) -> None:
     datasets = {
         name: open_group(
             args.data_dir, name, limit=args.limit, holdout_fraction=args.holdout_fraction,
-            holdout_seed=args.holdout_seed,
+            holdout_seed=args.holdout_seed, patient_fraction=args.patient_fraction, patient_seed=args.patient_seed,
         )
         for name in dict.fromkeys(needed)
     }
     started, checkpoint, config_sha256 = time.time(), args.checkpoint, None
     if checkpoint is None:
-        check_probe_head(args.probe_head, args.holdout_fraction, args.holdout_seed)
+        check_probe_head(
+            args.probe_head, args.holdout_fraction, args.holdout_seed, args.patient_fraction, args.patient_seed,
+        )
         record = write_run_record(
             output_dir, run_id=run_id, settings=vars(args), command=sys.argv if argv is None else [__file__, *argv],
             data_dir=args.data_dir, files={"pretrained": args.pretrained, "probe_head": args.probe_head},

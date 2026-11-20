@@ -30,7 +30,7 @@ from sklearn.metrics import roc_auc_score
 from torch import nn
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-from .data import LABEL_COLUMNS, SHD_INDEX, TABULAR_COLUMNS, EchoNextDataset, holdout_tag
+from .data import LABEL_COLUMNS, SHD_INDEX, TABULAR_COLUMNS, EchoNextDataset, holdout_tag, subsample_tag
 from .predictions import basic_metrics, predict
 
 DEFAULT_PRETRAINED = (
@@ -288,25 +288,34 @@ def fit_probe(
     return head, history
 
 
-def check_probe_head(probe_head: str | Path | None, holdout_fraction: float = 0.0, holdout_seed: int = 0) -> None:
+def check_probe_head(
+    probe_head: str | Path | None, holdout_fraction: float = 0.0, holdout_seed: int = 0,
+    patient_fraction: float = 1.0, patient_seed: int = 0,
+) -> None:
     """
-    Check that a starting output layer exists and was fitted without the held-out patients.
+    Check that a starting output layer exists and was fitted on the patients the run trains on.
 
     Args:
         probe_head: File saved by scripts/run_teacher_probe.py, or None for a run without one.
         holdout_fraction: Share of the Training patients the run holds out. 0 means none.
         holdout_seed: Seed of the held-out draw.
+        patient_fraction: Share of the fit patients the run trains on. 1 means all of them.
+        patient_seed: Seed of the draw of kept patients.
 
     Raises:
         ValueError: When the run holds patients out but the file is not in a folder named for
-            that holdout, such as probe_ho0.2_hs0. A layer fitted on every Training patient
-            has seen the held-out ones, so the run's dev scores would be too high.
+            that holdout and that share of patients, such as probe_ho0.2_hs0 or
+            probe_ho0.2_hs0_pf0.125_ps0. A layer fitted on more patients than the run trains
+            on has seen labels the run must not see, so its dev scores would be too high.
         FileNotFoundError: When the file does not exist.
     """
     if probe_head is None:
         return
-    path, tag = Path(probe_head), holdout_tag(holdout_fraction, holdout_seed)
+    path = Path(probe_head)
+    subsample = subsample_tag(patient_fraction, patient_seed)
+    tag = holdout_tag(holdout_fraction, holdout_seed) + subsample
     flags = f" --holdout-fraction {holdout_fraction:g} --holdout-seed {holdout_seed}" if tag else ""
+    flags += f" --patient-fraction {patient_fraction:g} --patient-seed {patient_seed}" if subsample else ""
     build = f"Build it with: python scripts/run_teacher_probe.py{flags}"
     if tag and not path.parent.name.endswith(tag):
         raise ValueError(

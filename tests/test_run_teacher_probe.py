@@ -7,6 +7,7 @@ import torch
 
 from compress_ecg.data import LABEL_COLUMNS
 from compress_ecg.teacher import Teacher, TeacherHead
+from test_data import edit_meta
 from test_teacher import FakeEncoder
 
 
@@ -100,4 +101,24 @@ def test_another_holdout_seed_gets_its_own_patients_and_files(run_probe, tmp_pat
 def test_probe_with_an_invalid_holdout_fraction_stops_before_anything_is_written(run_probe, tmp_path, fraction):
     with pytest.raises(SystemExit):
         run_probe("--holdout-fraction", fraction)
+    assert names_in(tmp_path) == ["data"]
+
+
+def test_subsampled_probe_fits_on_a_share_of_the_fit_patients_and_saves_apart(run_probe, holdout_dir, tmp_path):
+    # Patient b loses its SHD label, so fit patients a and b are both without SHD and half of them is 1.
+    edit_meta(holdout_dir, lambda meta: meta.loc.__setitem__((5, list(LABEL_COLUMNS)), 0))
+    run_probe("--holdout-fraction", "0.5", "--patient-fraction", "0.5", "--patient-seed", "0")
+    # Dev features do not depend on the share, so their file keeps the holdout name alone.
+    assert names_in(tmp_path / "features") == ["dev_ho0.5_hs0.npz", "fit_ho0.5_hs0_pf0.5_ps0.npz"]
+    assert saved_row_ids(tmp_path / "features" / "fit_ho0.5_hs0_pf0.5_ps0.npz") in ([1], [5, 9])
+    assert saved_row_ids(tmp_path / "features" / "dev_ho0.5_hs0.npz") == [17, 21]
+    assert names_in(tmp_path / "probe_ho0.5_hs0_pf0.5_ps0") == ["raw_lr0.01.pt", "rescaled_lr0.01.pt"]
+    assert (tmp_path / "probe_ho0.5_hs0_pf0.5_ps0.csv").is_file()
+    assert not (tmp_path / "probe_ho0.5_hs0").exists()
+
+
+@pytest.mark.parametrize("extra", [("--patient-fraction", "0.5"), ("--holdout-fraction", "0.5", "--patient-fraction", "0")])
+def test_probe_with_an_invalid_patient_fraction_stops_before_anything_is_written(run_probe, tmp_path, extra):
+    with pytest.raises(SystemExit):
+        run_probe(*extra)
     assert names_in(tmp_path) == ["data"]

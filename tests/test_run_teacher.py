@@ -8,6 +8,8 @@ import pytest
 import torch
 
 from compress_ecg.teacher import Teacher, TeacherHead
+from compress_ecg.data import LABEL_COLUMNS
+from test_data import edit_meta
 from test_teacher import FakeEncoder
 
 # ECGs per Training patient in the holdout_dir fixture.
@@ -133,4 +135,34 @@ def test_holdout_run_starts_from_the_output_layer_of_the_same_holdout(run_teache
 def test_run_with_a_missing_output_layer_stops_before_anything_is_written(run_teacher, tmp_path):
     with pytest.raises(FileNotFoundError, match="run_teacher_probe.py"):
         run_teacher("missing", "--probe-head", str(tmp_path / "probe" / "rescaled_lr0.001.pt"))
+    assert not (tmp_path / "checkpoints").exists()
+
+
+def test_subsampled_run_trains_on_a_share_of_the_fit_patients_and_scores_all_of_dev(run_teacher, holdout_dir, tmp_path):
+    # Patient b loses its SHD label, so fit patients a and b are both without SHD and half of them is 1.
+    edit_meta(holdout_dir, lambda meta: meta.loc.__setitem__((5, list(LABEL_COLUMNS)), 0))
+    run_teacher("small", "--holdout-fraction", "0.5", "--patient-fraction", "0.5", *COUNT_TRAINING_ECGS)
+    # Patient a has 1 ECG and patient b has 2, against 3 ECGs in all of fit.
+    assert pd.read_csv(tmp_path / "checkpoints" / "small" / "log.csv")["step"].tolist() in ([1], [1, 2])
+    assert pd.read_csv(tmp_path / "runs" / "small" / "teacher" / "dev" / "metadata.csv")["row_id"].tolist() == [17, 21]
+    settings = read_json(tmp_path / "checkpoints" / "small" / "config.json")["settings"]
+    assert (settings["patient_fraction"], settings["patient_seed"]) == (0.5, 0)
+
+
+@pytest.mark.parametrize("extra", [
+    ("--patient-fraction", "0.5"), ("--holdout-fraction", "0.5", "--patient-fraction", "0"),
+    ("--holdout-fraction", "0.5", "--patient-fraction", "1.5"),
+])
+def test_invalid_patient_fraction_arguments_stop_before_anything_is_written(run_teacher, tmp_path, extra):
+    with pytest.raises(SystemExit):
+        run_teacher("bad", *extra)
+    assert not (tmp_path / "checkpoints").exists()
+    assert not (tmp_path / "runs").exists()
+
+
+def test_subsampled_run_refuses_an_output_layer_fitted_on_all_fit_patients(run_teacher, holdout_dir, tmp_path):
+    edit_meta(holdout_dir, lambda meta: meta.loc.__setitem__((5, list(LABEL_COLUMNS)), 0))
+    all_fit_head = save_probe_head(tmp_path / "probe_ho0.5_hs0")
+    with pytest.raises(ValueError, match="_ho0.5_hs0_pf0.5_ps0"):
+        run_teacher("leak", "--holdout-fraction", "0.5", "--patient-fraction", "0.5", "--probe-head", all_fit_head)
     assert not (tmp_path / "checkpoints").exists()

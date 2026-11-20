@@ -511,3 +511,22 @@ def test_missing_whole_split_probe_head_names_the_plain_command(tmp_path):
 
 def test_run_without_a_holdout_accepts_any_existing_probe_head(tmp_path):
     check_probe_head(touch(tmp_path / "probe" / "rescaled_lr0.001.pt"))
+
+
+@pytest.mark.parametrize("folder", ["probe_ho0.2_hs0", "probe_ho0.2_hs0_pf0.25_ps0", "probe_ho0.2_hs0_pf0.125_ps1"])
+def test_subsampled_run_rejects_a_probe_head_fitted_on_other_patients(tmp_path, folder):
+    head = touch(tmp_path / folder / "rescaled_lr0.001.pt")
+    message = r"ends with _ho0\.2_hs0_pf0\.125_ps0.*--patient-fraction 0\.125 --patient-seed 0"
+    with pytest.raises(ValueError, match=message):
+        check_probe_head(head, holdout_fraction=0.2, holdout_seed=0, patient_fraction=0.125, patient_seed=0)
+
+
+def test_subsampled_run_accepts_the_probe_head_of_its_own_patients(tmp_path):
+    head = touch(tmp_path / "probe_ho0.2_hs0_pf0.125_ps0" / "rescaled_lr0.001.pt")
+    check_probe_head(head, holdout_fraction=0.2, holdout_seed=0, patient_fraction=0.125, patient_seed=0)
+
+
+def test_run_on_all_fit_patients_rejects_a_probe_head_fitted_on_a_share_of_them(tmp_path):
+    head = touch(tmp_path / "probe_ho0.2_hs0_pf0.125_ps0" / "rescaled_lr0.001.pt")
+    with pytest.raises(ValueError, match=r"ends with _ho0\.2_hs0\."):
+        check_probe_head(head, holdout_fraction=0.2, holdout_seed=0)
