@@ -22,14 +22,19 @@ FLAGS = {
     "max_epochs": "--max-epochs", "patience": "--patience", "num_workers": "--num-workers",
     "probe_head": "--probe-head", "log_every": "--log-every", "head_dropout": "--head-dropout",
     "lead_mask_prob": "--lead-mask-prob", "balance_patients": "--balance-patients",
+    "use_tabular": "--use-tabular", "tabular_lr": "--tabular-lr",
 }
 # Settings that change the result, and the short tag each adds to a run name when it is on.
-NAME_TAGS = (("head_dropout", "do"), ("lead_mask_prob", "lm"), ("balance_patients", "bp"))
+NAME_TAGS = (("head_dropout", "do"), ("lead_mask_prob", "lm"), ("balance_patients", "bp"), ("use_tabular", "tab"))
 
 
 def run_id_for(settings: dict) -> str:
-    """Name a run from its learning rates, its seed, and any overfitting control that is on."""
-    tags = "".join(f"_{tag}{settings[name]:g}" for name, tag in NAME_TAGS if settings.get(name))
+    """Name a run from its learning rates, its seed, and any setting in NAME_TAGS that is on."""
+    # An on or off switch adds its tag alone. A number adds its tag and its value.
+    tags = "".join(
+        f"_{tag}" if settings[name] is True else f"_{tag}{settings[name]:g}"
+        for name, tag in NAME_TAGS if settings.get(name)
+    )
     return f"lr{settings['lr']:g}_hlr{settings['head_lr']:g}{tags}_s{settings['seed']}"
 
 
@@ -79,8 +84,12 @@ def build_command(settings: dict, *, run_id: str, runs_root: str, python: str = 
     command = [python, str(script), "--device", "cuda", "--run-id", run_id,
                "--runs-root", f"{runs_root}/{run_id}", "--score-splits", "val"]
     for name, flag in FLAGS.items():
-        if settings.get(name) is not None:
-            command += [flag, str(settings[name])]
+        value = settings.get(name)
+        if isinstance(value, bool):
+            # A switch takes no value. It is passed only when on.
+            command += [flag] if value else []
+        elif value is not None:
+            command += [flag, str(value)]
     return command
 
 

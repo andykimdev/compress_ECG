@@ -70,3 +70,12 @@ def test_rounding_scores_keeps_small_learning_rates(data_dir, tmp_path):
     row = round_scores(collect_runs(tmp_path)).iloc[0]
     assert (row["lr"], row["head_lr"]) == (3e-6, 1e-4)
     assert (row["val_mean_auroc"], row["val_shd_auroc"], row["minutes"]) == (0.8123, 0.8312, 12.3)
+
+
+def test_table_shows_whether_a_run_read_the_7_numbers(data_dir, tmp_path):
+    make_run(tmp_path, "a", {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "use_tabular": True}, None, data_dir)
+    make_run(tmp_path, "b", {"lr": 1e-5, "head_lr": 1e-4, "seed": 42}, None, data_dir)
+    table = collect_runs(tmp_path)
+    assert table[["run_id", "use_tabular"]].to_dict("records") == [
+        {"run_id": "a", "use_tabular": True}, {"run_id": "b", "use_tabular": None},
+    ]

@@ -87,3 +87,38 @@ def test_regularization_config_gives_nine_runs_with_unique_names():
         "lr1e-05_hlr0.0001_bp0.5_s42", "lr1e-05_hlr0.0001_bp0.5_s43",
         "lr1e-05_hlr0.0001_do0.3_lm0.2_bp0.5_s42", "lr1e-05_hlr0.0001_do0.3_lm0.2_bp0.5_s43",
     ]
+
+
+def test_run_id_tags_a_run_that_reads_the_7_numbers():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "head_dropout": 0.5, "use_tabular": True}
+    assert run_id_for(settings) == "lr1e-05_hlr0.0001_do0.5_tab_s42"
+
+
+def test_run_id_has_no_tag_when_the_7_numbers_are_off():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "head_dropout": 0.5, "use_tabular": False}
+    assert run_id_for(settings) == "lr1e-05_hlr0.0001_do0.5_s42"
+
+
+def test_command_passes_an_on_switch_without_a_value():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "use_tabular": True, "tabular_lr": 0.001}
+    command = build_command(settings, run_id="r1", runs_root="runs/sweep", python="py")
+    assert command[-9:] == [
+        "--lr", "1e-05", "--head-lr", "0.0001", "--seed", "42", "--use-tabular", "--tabular-lr", "0.001",
+    ]
+
+
+def test_command_leaves_out_a_switch_that_is_off():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "use_tabular": False}
+    command = build_command(settings, run_id="r1", runs_root="runs/sweep", python="py")
+    assert command[-6:] == ["--lr", "1e-05", "--head-lr", "0.0001", "--seed", "42"]
+
+
+def test_tabular_config_gives_five_runs_with_unique_names():
+    config = json.loads((Path(__file__).resolve().parents[1] / "configs" / "teacher_tabular.json").read_text())
+    names = [run_id_for(run) for run in expand_runs(config)]
+    # The first name is the base run. The sweep skips it when its folder already exists.
+    assert names == [
+        "lr1e-05_hlr0.0001_do0.5_s42",
+        "lr1e-05_hlr0.0001_do0.5_tab_s42", "lr1e-05_hlr0.0001_do0.5_tab_s43",
+        "lr1e-05_hlr0.0001_do0.5_tab_s44", "lr1e-05_hlr0.0001_do0.5_s44",
+    ]
