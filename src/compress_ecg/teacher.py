@@ -4,6 +4,7 @@ Fine-tune ECG-FM into the Teacher.
 Purpose:
 - Convert our ECGs into the input ECG-FM was pretrained on, inside the model.
 - Add a 12-output layer to ECG-FM and fine-tune it with mixed precision.
+- Optionally add the 7 routine numbers to the outputs through a second small layer.
 - Train the output layer alone on saved ECG-FM features first, as a quick check.
 - Produce a frozen Teacher that follows the shared call format.
 
@@ -26,7 +27,7 @@ from sklearn.metrics import roc_auc_score
 from torch import nn
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-from .data import LABEL_COLUMNS, SHD_INDEX, EchoNextDataset
+from .data import LABEL_COLUMNS, SHD_INDEX, TABULAR_COLUMNS, EchoNextDataset
 from .predictions import basic_metrics, predict
 
 DEFAULT_PRETRAINED = (
@@ -114,12 +115,21 @@ class TeacherHead(nn.Module):
 class Teacher(nn.Module):
     """ECG-FM plus a 12-output layer, in the shared call format."""
 
-    def __init__(self, encoder: nn.Module, *, head_dropout: float = 0.0, lead_mask_prob: float = 0.0):
+    def __init__(
+        self, encoder: nn.Module, *, head_dropout: float = 0.0, lead_mask_prob: float = 0.0,
+        use_tabular: bool = False,
+    ):
         super().__init__()
         self.encoder = encoder
         self.head = TeacherHead(head_dropout)
         # In training mode only, each lead of each ECG is set to zero with this probability.
         self.lead_mask_prob = lead_mask_prob
+        self.tabular_head = None
+        if use_tabular:
+            self.tabular_head = nn.Linear(len(TABULAR_COLUMNS), len(LABEL_COLUMNS))
+            # Zero weights make a new Teacher start equal to the waveform-only one.
+            nn.init.zeros_(self.tabular_head.weight)
+            nn.init.zeros_(self.tabular_head.bias)
 
     def features(self, waveform: torch.Tensor) -> torch.Tensor:
         """Return ECG-FM's 768 averaged features for each ECG in waveform [batch, 12, 2500]."""
@@ -138,12 +148,16 @@ class Teacher(nn.Module):
         check_waveform(waveform)
         if tuple(tabular.shape) != (waveform.shape[0], 7):
             raise ValueError("Teacher expects tabular [batch,7]")
-        # The 7 extra numbers are not used. ECG-FM only reads the waveform.
-        return self.head(self.features(waveform))
+        logits = self.head(self.features(waveform))
+        if self.tabular_head is None:
+            # ECG-FM only reads the waveform, so the 7 numbers are ignored unless switched on.
+            return logits
+        return logits + self.tabular_head(tabular)
 
 
 def build_teacher(
     pretrained_path: str | Path, *, device: str = "cpu", head_dropout: float = 0.0, lead_mask_prob: float = 0.0,
+    use_tabular: bool = False,
 ) -> nn.Module:
     """
     Load ECG-FM and add a new output layer.
@@ -153,9 +167,11 @@ def build_teacher(
         device: Where the model is placed.
         head_dropout: Dropout on the 768 features before the output layer, in training only.
         lead_mask_prob: Chance that each lead is blanked in an ECG, in training only.
+        use_tabular: Whether a second output layer reads the 7 routine numbers.
 
     Returns:
-        A model where model(waveform, tabular) returns logits [batch, 12]. It ignores tabular.
+        A model where model(waveform, tabular) returns logits [batch, 12]. It ignores tabular
+        unless use_tabular is on.
 
     Raises:
         FileNotFoundError: When the checkpoint is missing.
@@ -171,7 +187,8 @@ def build_teacher(
     encoder = build_model_from_checkpoint(checkpoint_path=str(pretrained_path))
     # The quantizer and projection layers only served pretraining. Removing them leaves 90,374,016 parameters.
     encoder.remove_pretraining_modules()
-    return Teacher(encoder, head_dropout=head_dropout, lead_mask_prob=lead_mask_prob).to(device)
+    teacher = Teacher(encoder, head_dropout=head_dropout, lead_mask_prob=lead_mask_prob, use_tabular=use_tabular)
+    return teacher.to(device)
 
 
 @torch.inference_mode()
@@ -272,6 +289,7 @@ def train_teacher(
     *, device: str = "cpu", seed: int = 42, probe_head: str | Path | None = None,
     lr: float = 1e-5, head_lr: float = 1e-4, batch_size: int = 32, max_epochs: int = 10,
     patience: int = 2, num_workers: int = 0, log_every: int = 200, balance_patients: float = 0.0,
+    tabular_lr: float = 1e-3,
 ) -> Path:
     """
     Fine-tune the Teacher and save the best checkpoint.
@@ -293,6 +311,8 @@ def train_teacher(
         log_every: Steps between progress lines.
         balance_patients: Exponent for patient_weights. Above 0, each epoch draws ECGs with those
             weights, so patients with many ECGs are seen less often per ECG. 0 shuffles as usual.
+        tabular_lr: AdamW learning rate for the layer that reads the 7 routine numbers, when the
+            Teacher has one. It starts at zero, so it gets a higher rate than the output layer.
 
     Returns:
         The path of the best checkpoint, chosen by the mean AUROC over all 12 outputs.
@@ -319,6 +339,8 @@ def train_teacher(
         {"params": list(teacher.encoder.parameters()), "lr": lr},
         {"params": list(teacher.head.parameters()), "lr": head_lr},
     ]
+    if getattr(teacher, "tabular_head", None) is not None:
+        groups.append({"params": list(teacher.tabular_head.parameters()), "lr": tabular_lr})
     optimizer = torch.optim.AdamW([group for group in groups if group["params"]], weight_decay=0.01)
     on_gpu = str(device).startswith("cuda")
     use_bf16 = on_gpu and torch.cuda.is_bf16_supported()
@@ -390,9 +412,12 @@ def load_frozen_teacher(
         device: Where the model is placed.
 
     Returns:
-        The model in evaluation mode, in the shared call format.
+        The model in evaluation mode, in the shared call format. It reads the 7 routine
+        numbers exactly when the saved Teacher did.
     """
-    teacher = restore_teacher(build_teacher(pretrained_path), checkpoint)
+    saved = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    teacher = build_teacher(pretrained_path, use_tabular="tabular_head.weight" in saved["state_dict"])
+    teacher.load_state_dict(saved["state_dict"], strict=True)
     for parameter in teacher.parameters():
         parameter.requires_grad_(False)
     return teacher.to(device).eval()

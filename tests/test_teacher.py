@@ -9,8 +9,8 @@ from scipy.interpolate import interp1d
 from compress_ecg.data import SHD_INDEX, EchoNextDataset
 from compress_ecg.profiling import synthetic_inputs
 from compress_ecg.teacher import (
-    Teacher, TeacherHead, build_teacher, extract_features, fit_probe, masked_bce, mean_auroc,
-    patient_weights, restore_teacher, to_ecg_fm_input, train_teacher,
+    Teacher, TeacherHead, build_teacher, extract_features, fit_probe, load_frozen_teacher, masked_bce,
+    mean_auroc, patient_weights, restore_teacher, to_ecg_fm_input, train_teacher,
 )
 
 ECG_FM_CHECKPOINT = (
@@ -207,3 +207,57 @@ def test_training_with_patient_balancing_saves_a_checkpoint(data_dir, tmp_path):
         EchoNextDataset(data_dir, "val"), tmp_path / "teacher", max_epochs=1, balance_patients=0.5,
     )
     assert best.is_file()
+
+
+def tabular_teacher(weight: float = 0.0) -> Teacher:
+    """A Teacher that reads the 7 numbers, with every tabular weight set to one value."""
+    teacher = Teacher(FakeEncoder(), use_tabular=True).eval()
+    with torch.no_grad():
+        teacher.tabular_head.weight.fill_(weight)
+    return teacher
+
+
+def test_tabular_teacher_adds_a_weighted_sum_of_the_7_numbers():
+    teacher = tabular_teacher(weight=0.5)
+    waveform, tabular = synthetic_inputs(3)
+    change = teacher(waveform, tabular) - teacher(waveform, torch.zeros_like(tabular))
+    expected = (0.5 * tabular.sum(dim=1, keepdim=True)).expand(3, 12)
+    torch.testing.assert_close(change, expected, atol=1e-5, rtol=0)
+
+
+def test_new_tabular_teacher_matches_the_waveform_only_teacher():
+    plain, with_tabular = Teacher(FakeEncoder()).eval(), Teacher(FakeEncoder(), use_tabular=True).eval()
+    with_tabular.head.load_state_dict(plain.head.state_dict())
+    inputs = synthetic_inputs(3)
+    torch.testing.assert_close(with_tabular(*inputs), plain(*inputs))
+
+
+def test_training_learns_tabular_weights(data_dir, tmp_path):
+    teacher = Teacher(FakeEncoder(), use_tabular=True)
+    train_teacher(teacher, EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val"), tmp_path / "t", max_epochs=1)
+    assert teacher.tabular_head.weight.abs().sum() > 0
+
+
+def test_tabular_rate_of_zero_leaves_tabular_weights_at_zero(data_dir, tmp_path):
+    teacher = Teacher(FakeEncoder(), use_tabular=True)
+    train_teacher(
+        teacher, EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val"), tmp_path / "t",
+        max_epochs=1, tabular_lr=0.0,
+    )
+    assert torch.equal(teacher.tabular_head.weight, torch.zeros(12, 7))
+
+
+@pytest.mark.parametrize("use_tabular", [True, False])
+def test_frozen_teacher_is_rebuilt_with_the_inputs_it_was_trained_on(use_tabular, data_dir, tmp_path, monkeypatch):
+    trained = Teacher(FakeEncoder(), use_tabular=use_tabular)
+    best = train_teacher(
+        trained, EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val"), tmp_path / "t", max_epochs=1,
+    )
+    # ECG-FM itself is not needed to check which inputs the loader wires up.
+    monkeypatch.setattr(
+        "compress_ecg.teacher.build_teacher", lambda path, **options: Teacher(FakeEncoder(), **options),
+    )
+    frozen = load_frozen_teacher(best)
+    inputs = synthetic_inputs(2)
+    torch.testing.assert_close(frozen(*inputs), trained.eval()(*inputs))
+    assert not any(parameter.requires_grad for parameter in frozen.parameters())

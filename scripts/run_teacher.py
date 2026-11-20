@@ -41,6 +41,8 @@ def main() -> None:
     parser.add_argument("--head-dropout", type=float, default=0.0, help="Dropout before the output layer")
     parser.add_argument("--lead-mask-prob", type=float, default=0.0, help="Chance each lead is blanked in training")
     parser.add_argument("--balance-patients", type=float, default=0.0, help="Weight ECGs by patient count to this power")
+    parser.add_argument("--use-tabular", action="store_true", help="Add the 7 routine numbers to the outputs")
+    parser.add_argument("--tabular-lr", type=float, default=1e-3, help="Learning rate for the layer that reads them")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--max-epochs", type=int, default=10)
@@ -63,12 +65,13 @@ def main() -> None:
         config_sha256 = record["config_sha256"]
         teacher = build_teacher(
             args.pretrained, device=args.device, head_dropout=args.head_dropout, lead_mask_prob=args.lead_mask_prob,
+            use_tabular=args.use_tabular,
         )
         checkpoint = train_teacher(
             teacher, train, val, output_dir, device=args.device, seed=args.seed, probe_head=args.probe_head,
             lr=args.lr, head_lr=args.head_lr, batch_size=args.batch_size, max_epochs=args.max_epochs,
             patience=args.patience, num_workers=args.num_workers, log_every=args.log_every,
-            balance_patients=args.balance_patients,
+            balance_patients=args.balance_patients, tabular_lr=args.tabular_lr,
         )
     frozen = load_frozen_teacher(checkpoint, pretrained_path=args.pretrained, device=args.device)
     checkpoint_sha256 = sha256_file(checkpoint)
