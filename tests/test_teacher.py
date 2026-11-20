@@ -2,15 +2,17 @@ import csv
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 import torch
 from scipy.interpolate import interp1d
 
-from compress_ecg.data import SHD_INDEX, EchoNextDataset
+from compress_ecg.data import LABEL_COLUMNS, SHD_INDEX, EchoNextDataset
 from compress_ecg.profiling import synthetic_inputs
 from compress_ecg.teacher import (
-    Teacher, TeacherHead, build_teacher, extract_features, fit_probe, load_frozen_teacher, masked_bce,
-    mean_auroc, patient_weights, restore_teacher, to_ecg_fm_input, train_teacher,
+    Teacher, TeacherHead, average_checkpoints, build_teacher, ema_decay_at, ema_update, evaluation_steps,
+    extract_features, fit_probe, load_frozen_teacher, masked_bce, mean_auroc, patient_weights, restore_teacher,
+    to_ecg_fm_input, train_teacher,
 )
 
 ECG_FM_CHECKPOINT = (
@@ -261,3 +263,212 @@ def test_frozen_teacher_is_rebuilt_with_the_inputs_it_was_trained_on(use_tabular
     inputs = synthetic_inputs(2)
     torch.testing.assert_close(frozen(*inputs), trained.eval()(*inputs))
     assert not any(parameter.requires_grad for parameter in frozen.parameters())
+
+
+@pytest.mark.parametrize("steps_per_epoch, evals_per_epoch, expected", [
+    (1133, 1, {1133}), (1133, 4, {283, 566, 849, 1133}), (1, 4, {1}), (3, 2, {1, 3}),
+])
+def test_validation_is_scored_at_even_steps_and_at_the_epoch_end(steps_per_epoch, evals_per_epoch, expected):
+    assert evaluation_steps(steps_per_epoch, evals_per_epoch) == expected
+
+
+def test_zero_scorings_per_epoch_is_rejected():
+    with pytest.raises(ValueError, match="evals_per_epoch"):
+        evaluation_steps(10, 0)
+
+
+def test_running_average_moves_by_one_minus_decay():
+    average, model = torch.nn.Linear(1, 1), torch.nn.Linear(1, 1)
+    with torch.no_grad():
+        average.weight.fill_(1.0)
+        average.bias.fill_(0.0)
+        model.weight.fill_(3.0)
+        model.bias.fill_(-2.0)
+    ema_update(average, model, decay=0.75)
+    assert average.weight.item() == pytest.approx(1.5)
+    assert average.bias.item() == pytest.approx(-0.5)
+    assert model.weight.item() == 3.0
+
+
+def test_running_average_copies_buffers():
+    average, model = TeacherHead(), TeacherHead()
+    model.feature_mean.fill_(2.0)
+    ema_update(average, model, decay=0.9)
+    assert torch.equal(average.feature_mean, torch.full((768,), 2.0))
+
+
+def test_running_average_keeps_a_rising_share_of_itself_at_first():
+    # After n updates the share kept is (1 + n) / (10 + n), until that reaches the chosen decay.
+    assert [ema_decay_at(n, 0.999) for n in (1, 2, 90, 8989)] == pytest.approx([2 / 11, 3 / 12, 91 / 100, 8990 / 8999])
+
+
+def test_running_average_share_stops_rising_at_the_chosen_decay():
+    assert [ema_decay_at(n, 0.999) for n in (8990, 20000, 1000000)] == [0.999, 0.999, 0.999]
+    assert [ema_decay_at(n, 0.5) for n in (7, 8, 9, 50)] == pytest.approx([8 / 17, 0.5, 0.5, 0.5])
+
+
+def read_log(folder: Path) -> list[dict]:
+    """Read the log.csv that train_teacher wrote in a run folder."""
+    with (folder / "log.csv").open() as handle:
+        return list(csv.DictReader(handle))
+
+
+def test_default_log_keeps_one_row_per_epoch_and_the_same_columns(data_dir, tmp_path):
+    train, val = EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val")
+    train_teacher(Teacher(FakeEncoder()), train, val, tmp_path / "t", max_epochs=2, patience=5)
+    log = read_log(tmp_path / "t")
+    assert [row["epoch"] for row in log] == ["1", "2"]
+    assert list(log[0]) == ["epoch", "train_loss", "val_mean_auroc", "val_shd_auroc", "seconds"]
+
+
+def test_several_scorings_per_epoch_add_rows_with_the_update_count(data_dir, tmp_path):
+    train, val = EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val")
+    # 6 Training ECGs in batches of 2 give 3 updates per epoch.
+    train_teacher(
+        Teacher(FakeEncoder()), train, val, tmp_path / "t", batch_size=2, max_epochs=2, patience=10, evals_per_epoch=3,
+    )
+    log = read_log(tmp_path / "t")
+    assert [(row["epoch"], row["step"]) for row in log] == [
+        ("1", "1"), ("1", "2"), ("1", "3"), ("2", "4"), ("2", "5"), ("2", "6"),
+    ]
+
+
+def test_patience_counts_scorings_so_training_can_stop_inside_an_epoch(data_dir, tmp_path):
+    torch.manual_seed(0)
+    train, val = EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val")
+    # A large step size makes the score move up and down between scorings.
+    train_teacher(
+        Teacher(FakeEncoder()), train, val, tmp_path / "t", batch_size=2, head_lr=5.0, max_epochs=6, patience=1,
+        evals_per_epoch=3,
+    )
+    scores = [float(row["val_mean_auroc"]) for row in read_log(tmp_path / "t")]
+    # Training stops at the first scoring that is below the best one before it.
+    first_drop = next(i for i in range(1, 18) if scores[i] < max(scores[:i]))
+    assert len(scores) == first_drop + 1
+    assert len(scores) < 18
+
+
+def test_select_by_shd_saves_the_scoring_with_the_best_shd_auroc(data_dir, tmp_path):
+    # Give SHD its own Validation labels, so its score moves apart from the 12-output mean.
+    metadata_path = data_dir / "EchoNext_metadata_100k.csv"
+    metadata = pd.read_csv(metadata_path)
+    val_rows = metadata.index[metadata["split"].eq("val")]
+    metadata.loc[val_rows, LABEL_COLUMNS[SHD_INDEX]] = [1, 1, 1, 0, 0, 0]
+    metadata.to_csv(metadata_path, index=False)
+    torch.manual_seed(0)
+    train, val = EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val")
+    best = train_teacher(
+        Teacher(FakeEncoder()), train, val, tmp_path / "t", head_lr=5.0, max_epochs=6, patience=10, select_by="shd",
+    )
+    log = read_log(tmp_path / "t")
+    shd = [float(row["val_shd_auroc"]) for row in log]
+    mean = [float(row["val_mean_auroc"]) for row in log]
+    assert len(shd) == 6
+    by_shd = max(range(6), key=lambda i: (shd[i], i)) + 1
+    # The two rules must disagree here, or this test could not tell them apart.
+    assert by_shd != max(range(6), key=lambda i: (mean[i], i)) + 1
+    assert torch.load(best, weights_only=True)["epoch"] == by_shd
+
+
+@pytest.mark.parametrize("setting, value", [
+    ("select_by", "loss"), ("evals_per_epoch", 0), ("ema_decay", 1.0), ("ema_decay", -0.1),
+])
+def test_invalid_setting_is_rejected_before_training(setting, value, data_dir, tmp_path):
+    with pytest.raises(ValueError, match=setting):
+        train_teacher(
+            Teacher(FakeEncoder()), EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val"),
+            tmp_path / "t", **{setting: value},
+        )
+    assert not (tmp_path / "t").exists()
+
+
+@pytest.mark.parametrize("ema_decay, share_of_trained", [(0.999, 9 / 11), (0.1, 0.9)])
+def test_saved_checkpoint_holds_the_running_average_not_the_trained_weights(
+    ema_decay, share_of_trained, data_dir, tmp_path,
+):
+    train, val = EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val")
+    teacher = Teacher(FakeEncoder(), use_tabular=True)
+    # One update from tabular weights of 0. The average keeps 2 / 11 of those zeros, or
+    # ema_decay when that is lower, and takes the rest from the trained weights.
+    best = train_teacher(teacher, train, val, tmp_path / "t", max_epochs=1, ema_decay=ema_decay)
+    saved = torch.load(best, weights_only=True)["state_dict"]["tabular_head.weight"]
+    trained = teacher.tabular_head.weight.detach()
+    assert trained.abs().max() > 0
+    torch.testing.assert_close(saved, trained * share_of_trained)
+
+
+def test_log_with_a_running_average_also_scores_the_trained_weights(data_dir, tmp_path):
+    train, val = EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val")
+    train_teacher(Teacher(FakeEncoder()), train, val, tmp_path / "t", max_epochs=1, ema_decay=0.999)
+    assert list(read_log(tmp_path / "t")[0]) == [
+        "epoch", "train_loss", "val_mean_auroc", "val_shd_auroc", "raw_val_mean_auroc", "raw_val_shd_auroc", "seconds",
+    ]
+
+
+def test_training_seeds_numpy_so_library_draws_repeat(data_dir, tmp_path):
+    train, val = EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val")
+    np.random.seed(123)
+    train_teacher(Teacher(FakeEncoder()), train, val, tmp_path / "t", max_epochs=1, seed=7)
+    assert np.random.random() == np.random.RandomState(7).random_sample()
+
+
+def save_weights(path: Path, state: dict) -> Path:
+    """Save a state dict in the checkpoint format train_teacher writes."""
+    torch.save({"epoch": 1, "state_dict": state}, path)
+    return path
+
+
+def test_averaged_checkpoint_holds_the_mean_of_each_weight(tmp_path):
+    paths = [
+        save_weights(tmp_path / f"{value}.pt", {"w": torch.full((2,), value), "steps": torch.tensor(steps)})
+        for value, steps in ((1.0, 7), (4.0, 9), (10.0, 9))
+    ]
+    averaged = average_checkpoints(paths)
+    assert set(averaged) == {"w", "steps"}
+    torch.testing.assert_close(averaged["w"], torch.tensor([5.0, 5.0]))
+    # A whole-number tensor is a counter, not a weight, so it comes from the first checkpoint.
+    assert averaged["steps"].item() == 7
+
+
+def test_averaging_one_checkpoint_returns_its_weights(tmp_path):
+    path = save_weights(tmp_path / "a.pt", {"w": torch.tensor([1.5, -2.0])})
+    assert torch.equal(average_checkpoints([path])["w"], torch.tensor([1.5, -2.0]))
+
+
+def test_averaging_no_checkpoints_is_rejected():
+    with pytest.raises(ValueError, match="at least one"):
+        average_checkpoints([])
+
+
+def test_averaging_rejects_checkpoints_with_different_tensor_names(tmp_path):
+    first = save_weights(tmp_path / "a.pt", {"w": torch.zeros(1)})
+    second = save_weights(tmp_path / "b.pt", {"w": torch.zeros(1), "tabular": torch.zeros(1)})
+    with pytest.raises(ValueError, match=r"b\.pt.*different tensors.*tabular"):
+        average_checkpoints([first, second])
+
+
+def test_averaging_rejects_checkpoints_with_different_tensor_shapes(tmp_path):
+    first = save_weights(tmp_path / "a.pt", {"w": torch.zeros(2, 3), "bias": torch.zeros(2)})
+    second = save_weights(tmp_path / "b.pt", {"w": torch.zeros(3, 2), "bias": torch.zeros(2)})
+    with pytest.raises(ValueError, match=r"b\.pt.*different shape.*\['w'\]"):
+        average_checkpoints([first, second])
+
+
+@pytest.mark.parametrize("use_tabular", [True, False])
+def test_averaged_checkpoint_loads_as_a_frozen_teacher(use_tabular, tmp_path, monkeypatch):
+    teachers = [Teacher(FakeEncoder(), use_tabular=use_tabular).eval() for _ in range(2)]
+    if use_tabular:
+        for teacher, weight in zip(teachers, (0.2, 0.6)):
+            torch.nn.init.constant_(teacher.tabular_head.weight, weight)
+    paths = [save_weights(tmp_path / f"{i}.pt", teacher.state_dict()) for i, teacher in enumerate(teachers)]
+    # The same file layout that scripts/soup_teacher.py writes.
+    torch.save({"state_dict": average_checkpoints(paths), "sources": [str(p) for p in paths]}, tmp_path / "soup.pt")
+    monkeypatch.setattr(
+        "compress_ecg.teacher.build_teacher", lambda path, **options: Teacher(FakeEncoder(), **options),
+    )
+    frozen = load_frozen_teacher(tmp_path / "soup.pt")
+    inputs = synthetic_inputs(2)
+    # Both output layers are linear in their weights, so averaged weights give averaged logits.
+    expected = (teachers[0](*inputs) + teachers[1](*inputs)) / 2
+    torch.testing.assert_close(frozen(*inputs), expected, atol=1e-5, rtol=1e-5)
+    assert (frozen.tabular_head is not None) == use_tabular

@@ -33,8 +33,8 @@ CONFIG_NAME = "config.json"
 RESULT_NAME = "result.json"
 # Settings shown as table columns. Every setting stays in config.json.
 TABLE_SETTINGS = (
-    "lr", "head_lr", "head_dropout", "lead_mask_prob", "balance_patients", "use_tabular", "seed", "batch_size",
-    "max_epochs", "patience",
+    "lr", "head_lr", "head_dropout", "lead_mask_prob", "balance_patients", "use_tabular", "ema_decay",
+    "evals_per_epoch", "select_by", "seed", "batch_size", "max_epochs", "patience",
 )
 
 

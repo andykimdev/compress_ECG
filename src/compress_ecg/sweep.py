@@ -22,18 +22,41 @@ FLAGS = {
     "max_epochs": "--max-epochs", "patience": "--patience", "num_workers": "--num-workers",
     "probe_head": "--probe-head", "log_every": "--log-every", "head_dropout": "--head-dropout",
     "lead_mask_prob": "--lead-mask-prob", "balance_patients": "--balance-patients",
-    "use_tabular": "--use-tabular", "tabular_lr": "--tabular-lr",
+    "use_tabular": "--use-tabular", "tabular_lr": "--tabular-lr", "ema_decay": "--ema-decay",
+    "evals_per_epoch": "--evals-per-epoch", "select_by": "--select-by",
 }
 # Settings that change the result, and the short tag each adds to a run name when it is on.
-NAME_TAGS = (("head_dropout", "do"), ("lead_mask_prob", "lm"), ("balance_patients", "bp"), ("use_tabular", "tab"))
+NAME_TAGS = (
+    ("head_dropout", "do"), ("lead_mask_prob", "lm"), ("balance_patients", "bp"), ("use_tabular", "tab"),
+    ("ema_decay", "ema"), ("evals_per_epoch", "ev"), ("select_by", "by"),
+)
+# Settings whose off value is not 0 or False. A setting at its off value adds no tag.
+OFF_VALUES = {"evals_per_epoch": 1, "select_by": "mean"}
+
+
+def name_tag(tag: str, value: bool | float | str) -> str:
+    """
+    Return the part of a run name for one setting that is on.
+
+    Args:
+        tag: The setting's short tag from NAME_TAGS.
+        value: The setting's value.
+
+    Returns:
+        The tag alone for an on or off switch, and the tag followed by the value otherwise.
+    """
+    if value is True:
+        return f"_{tag}"
+    if isinstance(value, str):
+        return f"_{tag}{value}"
+    return f"_{tag}{value:g}"
 
 
 def run_id_for(settings: dict) -> str:
     """Name a run from its learning rates, its seed, and any setting in NAME_TAGS that is on."""
-    # An on or off switch adds its tag alone. A number adds its tag and its value.
     tags = "".join(
-        f"_{tag}" if settings[name] is True else f"_{tag}{settings[name]:g}"
-        for name, tag in NAME_TAGS if settings.get(name)
+        name_tag(tag, settings[name]) for name, tag in NAME_TAGS
+        if settings.get(name) and settings[name] != OFF_VALUES.get(name)
     )
     return f"lr{settings['lr']:g}_hlr{settings['head_lr']:g}{tags}_s{settings['seed']}"
 

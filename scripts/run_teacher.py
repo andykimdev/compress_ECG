@@ -11,15 +11,26 @@ from pathlib import Path
 from compress_ecg.data import EchoNextDataset
 from compress_ecg.predictions import sha256_file, write_run
 from compress_ecg.runs import write_result, write_run_record
-from compress_ecg.teacher import build_teacher, load_frozen_teacher, train_teacher
+from compress_ecg.teacher import SELECT_COLUMNS, build_teacher, load_frozen_teacher, train_teacher
 
 
-def best_epoch(log_path: Path) -> dict:
-    """Return the log row with the best Validation mean AUROC, and how many epochs ran."""
+def best_epoch(log_path: Path, select_by: str = "mean") -> dict:
+    """
+    Summarize a training log for result.json.
+
+    Args:
+        log_path: The log.csv that train_teacher wrote.
+        select_by: The score that picked the checkpoint, a key of SELECT_COLUMNS.
+
+    Returns:
+        The epoch and both Validation scores of the row with the best such score, where the
+        latest row wins a tie, and the number of epochs that ran.
+    """
     rows = list(csv.DictReader(log_path.open()))
-    best = max(range(len(rows)), key=lambda i: (float(rows[i]["val_mean_auroc"]), i))
+    best = max(range(len(rows)), key=lambda i: (float(rows[i][SELECT_COLUMNS[select_by]]), i))
     return {
-        "best_epoch": int(rows[best]["epoch"]), "epochs_run": len(rows),
+        # With several scorings per epoch the log has several rows per epoch, so rows are not counted.
+        "best_epoch": int(rows[best]["epoch"]), "epochs_run": int(rows[-1]["epoch"]),
         "val_mean_auroc": float(rows[best]["val_mean_auroc"]), "val_shd_auroc": float(rows[best]["val_shd_auroc"]),
     }
 
@@ -43,10 +54,22 @@ def main() -> None:
     parser.add_argument("--balance-patients", type=float, default=0.0, help="Weight ECGs by patient count to this power")
     parser.add_argument("--use-tabular", action="store_true", help="Add the 7 routine numbers to the outputs")
     parser.add_argument("--tabular-lr", type=float, default=1e-3, help="Learning rate for the layer that reads them")
+    parser.add_argument("--ema-decay", type=float, default=0.0,
+                        help="Score and save a running average of the weights in place of the trained weights. "
+                             "Each update keeps a share of the old average and takes the rest from the new "
+                             "weights. The share is (1 + n) / (10 + n) after n updates and stops rising at this "
+                             "value. So the average covers roughly the most recent ninth of the updates so far, "
+                             "and 0.999 is only reached after 8,990 updates, more than a typical run takes. "
+                             "0 is off")
+    parser.add_argument("--evals-per-epoch", type=int, default=1,
+                        help="Validation scorings per epoch, evenly spaced. Each adds a row to log.csv")
+    parser.add_argument("--select-by", choices=tuple(SELECT_COLUMNS), default="mean",
+                        help="Validation score that picks the checkpoint: the 12-output mean AUROC or SHD AUROC")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--max-epochs", type=int, default=10)
-    parser.add_argument("--patience", type=int, default=2)
+    parser.add_argument("--patience", type=int, default=2,
+                        help="Validation scorings without a better score before stopping. Epochs, at one per epoch")
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--log-every", type=int, default=200, help="Steps between progress lines")
     parser.add_argument("--limit", type=int, help="Use only this many ECGs per split, for a quick check")
@@ -71,7 +94,8 @@ def main() -> None:
             teacher, train, val, output_dir, device=args.device, seed=args.seed, probe_head=args.probe_head,
             lr=args.lr, head_lr=args.head_lr, batch_size=args.batch_size, max_epochs=args.max_epochs,
             patience=args.patience, num_workers=args.num_workers, log_every=args.log_every,
-            balance_patients=args.balance_patients, tabular_lr=args.tabular_lr,
+            balance_patients=args.balance_patients, tabular_lr=args.tabular_lr, ema_decay=args.ema_decay,
+            evals_per_epoch=args.evals_per_epoch, select_by=args.select_by,
         )
     frozen = load_frozen_teacher(checkpoint, pretrained_path=args.pretrained, device=args.device)
     checkpoint_sha256 = sha256_file(checkpoint)
@@ -86,7 +110,8 @@ def main() -> None:
         ))
     if args.checkpoint is None:
         write_result(output_dir, {
-            "run_id": run_id, **best_epoch(output_dir / "log.csv"), "minutes": round((time.time() - started) / 60, 1),
+            "run_id": run_id, **best_epoch(output_dir / "log.csv", args.select_by),
+            "minutes": round((time.time() - started) / 60, 1),
             "checkpoint_sha256": checkpoint_sha256, "scored": [d.split for d in scored],
             "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         })

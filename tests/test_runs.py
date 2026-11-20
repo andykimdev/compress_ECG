@@ -79,3 +79,12 @@ def test_table_shows_whether_a_run_read_the_7_numbers(data_dir, tmp_path):
     assert table[["run_id", "use_tabular"]].to_dict("records") == [
         {"run_id": "a", "use_tabular": True}, {"run_id": "b", "use_tabular": None},
     ]
+
+
+def test_table_shows_the_weight_averaging_settings(data_dir, tmp_path):
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "ema_decay": 0.999, "evals_per_epoch": 4, "select_by": "shd"}
+    make_run(tmp_path, "a", settings, None, data_dir)
+    table = collect_runs(tmp_path)
+    assert table[["run_id", "ema_decay", "evals_per_epoch", "select_by"]].to_dict("records") == [
+        {"run_id": "a", "ema_decay": 0.999, "evals_per_epoch": 4, "select_by": "shd"},
+    ]

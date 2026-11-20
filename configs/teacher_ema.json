@@ -1,0 +1,27 @@
+{
+  "base": {
+    "lr": 1e-5,
+    "head_lr": 1e-4,
+    "head_dropout": 0.5,
+    "use_tabular": true,
+    "ema_decay": 0.999,
+    "evals_per_epoch": 4,
+    "select_by": "shd",
+    "batch_size": 64,
+    "num_workers": 8,
+    "max_epochs": 20,
+    "patience": 8,
+    "seed": 42,
+    "log_every": 200,
+    "probe_head": "checkpoints/teacher/probe/rescaled_lr0.001.pt"
+  },
+  "extra_runs": [
+    {"seed": 42},
+    {"seed": 43},
+    {"seed": 44},
+    {"seed": 45},
+    {"seed": 46},
+    {"seed": 47}
+  ],
+  "max_parallel": 6
+}

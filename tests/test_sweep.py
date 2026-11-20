@@ -122,3 +122,32 @@ def test_tabular_config_gives_five_runs_with_unique_names():
         "lr1e-05_hlr0.0001_do0.5_tab_s42", "lr1e-05_hlr0.0001_do0.5_tab_s43",
         "lr1e-05_hlr0.0001_do0.5_tab_s44", "lr1e-05_hlr0.0001_do0.5_s44",
     ]
+
+
+def test_run_id_tags_the_weight_averaging_settings_that_are_on():
+    settings = {
+        "lr": 1e-5, "head_lr": 1e-4, "seed": 42, "use_tabular": True, "ema_decay": 0.999, "evals_per_epoch": 4,
+        "select_by": "shd",
+    }
+    assert run_id_for(settings) == "lr1e-05_hlr0.0001_tab_ema0.999_ev4_byshd_s42"
+
+
+def test_run_id_has_no_tag_for_weight_averaging_settings_at_their_defaults():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "ema_decay": 0.0, "evals_per_epoch": 1, "select_by": "mean"}
+    assert run_id_for(settings) == "lr1e-05_hlr0.0001_s42"
+
+
+def test_command_passes_the_weight_averaging_settings():
+    settings = {"lr": 1e-5, "head_lr": 1e-4, "seed": 42, "ema_decay": 0.999, "evals_per_epoch": 4, "select_by": "shd"}
+    command = build_command(settings, run_id="r1", runs_root="runs/sweep", python="py")
+    assert command[-12:] == [
+        "--lr", "1e-05", "--head-lr", "0.0001", "--seed", "42", "--ema-decay", "0.999", "--evals-per-epoch", "4",
+        "--select-by", "shd",
+    ]
+
+
+def test_ema_config_gives_six_seeds_with_unique_names():
+    config = json.loads((Path(__file__).resolve().parents[1] / "configs" / "teacher_ema.json").read_text())
+    names = [run_id_for(run) for run in expand_runs(config)]
+    assert names == [f"lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd_s{seed}" for seed in (42, 43, 44, 45, 46, 47)]
+    assert config["max_parallel"] == 6
