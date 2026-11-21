@@ -1,0 +1,27 @@
+{
+  "name": "soup6_lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd",
+  "description": "Teacher made by averaging the weights of 6 fine-tuning runs into one model",
+  "checkpoint": "checkpoints/teacher/runs/soup6_lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd/best.pt",
+  "bytes": 361594815,
+  "sha256": "1db5e09cc7737213c4b1661541eda81508e4330e761a34fd9d25dc26c19fc084",
+  "huggingface": {
+    "repo": "compress-ecg/teacher",
+    "visibility": "private",
+    "file": "best.pt",
+    "commit": "d2064d6"
+  },
+  "code_commit": "428a049",
+  "built_by": "scripts/soup_teacher.py",
+  "source_runs": [
+    "lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd_s42",
+    "lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd_s43",
+    "lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd_s44",
+    "lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd_s45",
+    "lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd_s46",
+    "lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd_s47"
+  ],
+  "scored_on": "val",
+  "val_ecgs": 4626,
+  "val_shd_auroc": 0.8515,
+  "val_mean_auroc": 0.8362
+}
