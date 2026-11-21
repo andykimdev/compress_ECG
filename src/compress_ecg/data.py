@@ -7,6 +7,7 @@ Array rows match metadata filtered by split in its ORIGINAL order, not by patien
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +41,10 @@ TABULAR_COLUMNS = (
 # PhysioNet ships the lowercase name, while its README uses the other. Linux disks treat them apart.
 METADATA_FILENAMES = ("echonext_metadata_100k.csv", "EchoNext_metadata_100k.csv")
 AUDIT_COLUMNS = ("race_ethnicity", "sex", "age_at_ecg", "location_setting")
+# Parts of the train split for pilot runs: fit trains a model and dev judges it. See part_rows.
+PARTS = ("fit", "dev")
+# Metadata flag that is 1 on exactly one ECG per patient in train, val, and test: the latest one.
+RECENT_COLUMN = "most_recent_ecg"
 
 
 def find_metadata_file(root: Path) -> Path | None:
@@ -85,6 +90,133 @@ def read_metadata(data_dir: str | Path | None = None) -> pd.DataFrame:
     return meta
 
 
+def held_out_patients(patient_keys: Sequence[str] | np.ndarray, fraction: float, seed: int = 0) -> np.ndarray:
+    """
+    Pick the patients that are held out of training to judge pilot runs.
+
+    Args:
+        patient_keys: The patient of every Training ECG. Repeats and row order do not matter.
+        fraction: Share of the unique patients to hold out, above 0 and below 1.
+        seed: Seed of the draw. The same seed and patients give the same result.
+
+    Returns:
+        The held-out patient keys, unique and sorted. Their count is fraction times the
+        number of unique patients, rounded to the nearest whole number.
+
+    Raises:
+        ValueError: When fraction is not between 0 and 1, or one side would get no patient.
+    """
+    if not 0 < fraction < 1:
+        raise ValueError(f"holdout_fraction must be above 0 and below 1, got {fraction}")
+    # Drawing from the sorted unique keys makes the result independent of row order.
+    unique = np.unique(np.asarray(patient_keys, dtype=str))
+    count = round(fraction * len(unique))
+    if count == 0 or count == len(unique):
+        raise ValueError(f"holdout_fraction {fraction} leaves no patient on one side of {len(unique)} patients")
+    chosen = np.random.default_rng(seed).choice(len(unique), count, replace=False)
+    return unique[np.sort(chosen)]
+
+
+def part_rows(metadata: pd.DataFrame, part: str, fraction: float, seed: int = 0) -> np.ndarray:
+    """
+    Return the rows of the Training metadata that belong to one part.
+
+    Args:
+        metadata: The Training rows, with patient_key and, for dev, the most_recent_ecg flag.
+        part: fit for every ECG of the patients that are not held out, or dev for exactly
+            one ECG per held-out patient, the one flagged as most recent. Validation and Test
+            also hold one ECG per patient, all flagged, so dev scores compare with theirs.
+        fraction: Share of the patients to hold out. See held_out_patients.
+        seed: Seed of the held-out draw.
+
+    Returns:
+        Row positions in metadata, in increasing order.
+
+    Raises:
+        ValueError: When part is unknown, the flag column is missing, or a held-out patient
+            does not have exactly one flagged ECG.
+    """
+    if part not in PARTS:
+        raise ValueError(f"part must be one of {PARTS}, got {part!r}")
+    keys = metadata["patient_key"].to_numpy(dtype=str)
+    held_out = np.isin(keys, held_out_patients(keys, fraction, seed))
+    if part == "fit":
+        return np.flatnonzero(~held_out)
+    if RECENT_COLUMN not in metadata.columns:
+        raise ValueError(f"The dev part needs the metadata column {RECENT_COLUMN}")
+    rows = np.flatnonzero(held_out & metadata[RECENT_COLUMN].eq(1).to_numpy())
+    if not np.array_equal(np.sort(keys[rows]), np.unique(keys[held_out])):
+        raise ValueError(f"Every held-out patient needs exactly one ECG with {RECENT_COLUMN} set to 1")
+    return rows
+
+
+def holdout_tag(fraction: float, seed: int = 0) -> str:
+    """
+    Name a holdout for the files and folders that depend on it.
+
+    Args:
+        fraction: Share of the Training patients that is held out. 0 means no holdout.
+        seed: Seed of the held-out draw.
+
+    Returns:
+        An empty string without a holdout, and otherwise a tag such as _ho0.2_hs0.
+    """
+    return f"_ho{fraction:g}_hs{seed}" if fraction else ""
+
+
+def kept_patients(
+    patient_keys: Sequence[str] | np.ndarray, shd: Sequence[bool] | np.ndarray, fraction: float, seed: int = 0,
+) -> np.ndarray:
+    """
+    Pick a share of the patients to train on, for one point of a learning curve.
+
+    Args:
+        patient_keys: The patient of every ECG. Repeats and row order do not matter.
+        shd: Whether each ECG has the SHD label. A patient with SHD on any ECG counts as with SHD.
+        fraction: Share of the patients to keep, above 0 and at most 1.
+        seed: Seed of the draw. The same seed and patients give the same result.
+
+    Returns:
+        The kept patient keys, unique and sorted. The share is taken separately among the
+        patients with SHD and those without, each count rounded to the nearest whole number.
+
+    Raises:
+        ValueError: When fraction is not above 0 and at most 1, or no patient is kept.
+
+    Notes:
+        With one seed, the patients of a smaller share are all inside every larger share.
+    """
+    if not 0 < fraction <= 1:
+        raise ValueError(f"patient_fraction must be above 0 and at most 1, got {fraction}")
+    # Drawing from the sorted unique keys makes the result independent of row order.
+    unique, patient_of = np.unique(np.asarray(patient_keys, dtype=str), return_inverse=True)
+    with_shd = np.bincount(patient_of, weights=np.asarray(shd, dtype=float), minlength=len(unique)) > 0
+    rng = np.random.default_rng(seed)
+    kept = []
+    for group in (False, True):
+        # The order does not depend on the fraction, so a smaller share is the start of a larger one.
+        order = rng.permutation(np.flatnonzero(with_shd == group))
+        kept.append(order[:round(fraction * len(order))])
+    chosen = np.sort(np.concatenate(kept))
+    if not len(chosen):
+        raise ValueError(f"patient_fraction {fraction} keeps no patient of {len(unique)}")
+    return unique[chosen]
+
+
+def subsample_tag(fraction: float, seed: int = 0) -> str:
+    """
+    Name a patient subsample for the files and folders that depend on it.
+
+    Args:
+        fraction: Share of the fit patients that is kept. 1 means all of them.
+        seed: Seed of the draw of kept patients.
+
+    Returns:
+        An empty string for all patients, and otherwise a tag such as _pf0.125_ps0.
+    """
+    return f"_pf{fraction:g}_ps{seed}" if fraction != 1 else ""
+
+
 class EchoNextDataset(Dataset):
     """Memory-mapped, map-style dataset shared by teacher, student and Mini.
 
@@ -94,18 +226,35 @@ class EchoNextDataset(Dataset):
     include them in a loss/metric as negatives. The SHD label must be observed.
     Use the supplied tabular array; metadata echo measurements are never inputs.
     Set load_waveforms=False to use tabular features and labels without ECG arrays.
+
+    For pilot runs the train split can be served in two parts that share no patient.
+    Pass part fit or dev with holdout_fraction and holdout_seed. See part_rows. The
+    group attribute names what is served: the split, or the part when one is chosen.
+    limit draws its ECGs from inside the chosen part. For a learning curve the fit part can
+    be cut to a share of its patients with patient_fraction and patient_seed. See kept_patients.
     """
 
     def __init__(
         self, data_dir: str | Path | None = None, split: str = "train", *,
-        limit: int | None = None, seed: int = 42, load_waveforms: bool = True,
+        limit: int | None = None, seed: int = 42, load_waveforms: bool = True, part: str | None = None,
+        holdout_fraction: float = 0.0, holdout_seed: int = 0, patient_fraction: float = 1.0, patient_seed: int = 0,
     ):
         if split not in MODEL_SPLITS:
             raise ValueError("Choose train, val or test; no_split is excluded from experiments")
         if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0):
             raise ValueError("limit must be a positive integer or None")
+        if part is not None and split != "train":
+            raise ValueError(f"Only the train split has fit and dev parts. The {split} split is always served whole")
+        if part is None and holdout_fraction != 0:
+            raise ValueError("Choose part fit or dev when holdout_fraction is not 0")
+        if patient_fraction != 1 and part != "fit":
+            raise ValueError("Only the fit part can be cut to a share of its patients")
         self.root = resolve_data_dir(data_dir)
         self.split = split
+        self.part = part
+        self.group = split if part is None else part
+        self.holdout_fraction = holdout_fraction
+        self.holdout_seed = holdout_seed
         self.seed = seed
         self.metadata = read_metadata(self.root).query("split == @split").reset_index(drop=True)
         self.metadata.insert(1, "split_row", np.arange(len(self.metadata), dtype=np.int64))
@@ -133,8 +282,15 @@ class EchoNextDataset(Dataset):
         self.label_mask = np.isfinite(labels)
         self.labels = np.nan_to_num(labels, nan=0.0)
         self.indices = np.arange(count)
-        if limit is not None and limit < count:
-            self.indices = np.sort(np.random.default_rng(seed).choice(count, limit, replace=False))
+        if part is not None:
+            self.indices = part_rows(self.metadata, part, holdout_fraction, holdout_seed)
+        if patient_fraction != 1:
+            keys = self.metadata["patient_key"].to_numpy(dtype=str)[self.indices]
+            kept = kept_patients(keys, self.labels[self.indices, SHD_INDEX] == 1, patient_fraction, patient_seed)
+            self.indices = self.indices[np.isin(keys, kept)]
+        if limit is not None and limit < len(self.indices):
+            chosen = np.random.default_rng(seed).choice(len(self.indices), limit, replace=False)
+            self.indices = self.indices[np.sort(chosen)]
 
     def _open_arrays(self):
         # Reopen after fork/spawn instead of copying multi-GB arrays to workers.
@@ -188,3 +344,30 @@ class EchoNextDataset(Dataset):
     def selected_metadata(self) -> pd.DataFrame:
         """Rows in dataset order; filtering never changes the array lookup indices."""
         return self.metadata.iloc[self.indices].copy().reset_index(drop=True)
+
+
+def open_group(
+    data_dir: str | Path | None, name: str, *, limit: int | None = None,
+    holdout_fraction: float = 0.0, holdout_seed: int = 0, patient_fraction: float = 1.0, patient_seed: int = 0,
+) -> EchoNextDataset:
+    """
+    Open one group of ECGs by the name its run folder carries.
+
+    Args:
+        data_dir: Folder with the EchoNext files, or None for the default.
+        name: train, val, or test for a whole split, or fit or dev for a part of train.
+        limit: Use only this many ECGs of the group.
+        holdout_fraction: Share of the Training patients held out. Only a part uses it.
+        holdout_seed: Seed of the held-out draw. Only a part uses it.
+        patient_fraction: Share of the fit patients to keep. Only fit uses it, so dev stays whole.
+        patient_seed: Seed of the draw of kept patients. Only fit uses it.
+
+    Returns:
+        The dataset whose group attribute equals name.
+    """
+    if name in PARTS:
+        return EchoNextDataset(
+            data_dir, "train", limit=limit, part=name, holdout_fraction=holdout_fraction, holdout_seed=holdout_seed,
+            patient_fraction=patient_fraction if name == "fit" else 1.0, patient_seed=patient_seed,
+        )
+    return EchoNextDataset(data_dir, name, limit=limit)

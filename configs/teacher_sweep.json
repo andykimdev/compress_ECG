@@ -1,0 +1,19 @@
+{
+  "base": {
+    "batch_size": 64,
+    "num_workers": 8,
+    "max_epochs": 20,
+    "patience": 2,
+    "seed": 42,
+    "log_every": 200,
+    "probe_head": "checkpoints/teacher/probe/rescaled_lr0.001.pt"
+  },
+  "grid": {
+    "lr": [1e-6, 3e-6, 1e-5, 3e-5],
+    "head_lr": [1e-4, 1e-3]
+  },
+  "extra_runs": [
+    {"lr": 1e-5, "head_lr": 1e-4, "seed": 43}
+  ],
+  "max_parallel": 3
+}

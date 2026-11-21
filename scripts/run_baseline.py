@@ -60,8 +60,11 @@ def main():
         )
     else:
         result = run_gradient_boosting(args.data_dir, destination, train_limit=args.train_limit, **options)
-    print(json.dumps({"output_dir": result["output_dir"], "n_records": result["n_records"],
-                      "shd": result["metrics"][LABEL_COLUMNS[SHD_INDEX]]}, indent=2))
+    summary = {"output_dir": result["output_dir"], "n_records": result["n_records"],
+               "shd": result["metrics"][LABEL_COLUMNS[SHD_INDEX]]}
+    # Only the Mini run reports its prediction time and model size.
+    summary.update({key: result[key] for key in ("predict_time", "model_size_bytes") if key in result})
+    print(json.dumps(summary, indent=2))
 
 
 if __name__ == "__main__":

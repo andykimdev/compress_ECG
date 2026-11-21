@@ -47,12 +47,14 @@ Only the Teacher and the Student are trained by us.
 | EchoNext | Full FDA-cleared Columbia model | Not released | 85.2 | Context only |
 | EchoNext-Mini | Released small version, ResNet design | 1.05M | 82.0 | Baseline to compare against |
 | ECG-FM | Pretrained ECG foundation model | 90.9M | None yet | Starting point for the Teacher |
-| Teacher | ECG-FM plus a new output layer | 90.9M | To measure | Fine-tune it, and it must beat 82.0 |
+| Teacher | ECG-FM plus a new output layer | 90.4M | 85.15 on Validation | Fine-tune it, and it must beat 82.0 |
 | Student | EchoNext-Mini design, made narrower | 0.10M | To measure | Train it by distillation |
 | Student FP16 and INT8 | Student stored in 16 or 8 bits | 0.10M | To measure | Quantize and deploy it |
 
 AUROC is explained under [How we judge a model](#how-we-judge-a-model). The EchoNext and
-EchoNext-Mini scores are the published ones. We have not reproduced them yet.
+EchoNext-Mini scores are the published ones. We have not reproduced them yet. The Teacher score is
+ours, on the Validation ECGs, and the [Teacher guide](docs/teacher.md) explains how to get and use
+the model.
 
 ## The experiment pipeline
 
@@ -207,7 +209,8 @@ your role's stand-in in that test with the real call.
 - **Done on the Role A branch:** Mini inference, tabular gradient boosting, and synthetic-input
   profiling are implemented. The baseline notebook runs both models against the same splits.
 - **Next:** Run both baselines on the real dataset and compare Mini's Test SHD AUROC with 82.0.
-- **After that:** Start step 2, the Teacher.
+- **Done:** The Teacher is fine-tuned and scores 85.15 SHD AUROC on Validation. The
+  [Teacher guide](docs/teacher.md) covers how to download it and make its predictions.
 - **Not decided yet:** The one deployment device for steps 4 and 5.
 
 ## The data
@@ -291,6 +294,21 @@ python scripts/run_baseline.py --config configs/mini_baseline.json
 python scripts/run_baseline.py --model mini --split test --limit 0
 python scripts/run_baseline.py --model gradient_boosting --split test --limit 0
 python scripts/run_profile.py --device cpu --output results/profiling/mini_cpu.csv
+```
+
+### Teacher setup
+
+Role B needs this, and so does anyone who runs the Teacher to make its predictions. Loading
+ECG-FM needs fairseq-signals, which works with Python 3.10 and a `transformers` version below
+4.50. Keep it in its own environment, outside the repository. The
+[Teacher guide](docs/teacher.md) covers the rest.
+
+```bash
+python3.10 -m venv ~/venvs/compress-ecg-teacher
+source ~/venvs/compress-ecg-teacher/bin/activate
+pip install "torch>=2.6" "transformers>=4.19,<4.50" -e '.[dev]' \
+  "fairseq-signals @ git+https://github.com/Jwoo5/fairseq-signals@f8f0ff1c788a82c2059cb452cd5462898867489e"
+pytest -q tests/test_teacher.py
 ```
 
 ## Repository layout
