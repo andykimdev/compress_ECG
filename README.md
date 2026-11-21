@@ -1,6 +1,6 @@
 # compress_ECG
 
-**Master plan, last updated November 5, 2026.** This file replaces the plan in our original
+**Master plan, last updated November 20, 2026.** This file replaces the plan in our original
 [proposal](docs/proposal.pdf) wherever the two differ.
 
 We are shrinking a heart disease detection model so it can run on small devices, without making
@@ -63,7 +63,7 @@ Each step produces the input for the next step.
 | Step | What we do | What it makes |
 |---|---|---|
 | 1. Data | Use the 100,000 EchoNext-Mini ECGs and their official splits | No model yet |
-| 2. Teacher | Add an output layer to ECG-FM, then fine-tune it with mixed precision | Teacher |
+| 2. Teacher | Add an output layer to ECG-FM that also reads the 7 extra numbers, fine-tune 6 runs with dropout and mixed precision, then average their weights | Teacher |
 | 3. Student | Train the Mini design at width 5 to copy the Teacher | Student |
 | 4. Quantize | Convert to FP16, INT8 post-training, and INT8 quant-aware | FP16 and INT8 Students |
 | 5. Profile and audit | Measure speed, memory, cost, AUROC, and calibration per subgroup | Comparison of all models |
@@ -72,6 +72,10 @@ The terms in this table mean the following.
 
 - **Fine-tuning:** Continuing to train a pretrained model on a new task.
 - **Mixed precision:** Training with a mix of 16-bit and 32-bit numbers to run faster.
+- **Dropout:** Switching off a random share of values during training, so the model relies less on
+  any single one.
+- **Weight averaging:** Combining several trained copies of a model into one by averaging their
+  numbers.
 - **Distillation:** Training a small model to copy the outputs of a large one.
 - **Quantization:** Storing a model's numbers with fewer bits, which makes it smaller.
 - **Post-training INT8:** Converting to 8 bits after training is finished.
@@ -150,18 +154,19 @@ calibration error and the Brier score, which is the average squared error of the
 
 ## Code map
 
-Each role fills in one file. Functions that are not written yet raise `NotImplementedError` with
-a note on what to do, and their docstrings give the exact inputs and outputs.
+Each role fills in its own files. Functions that are not written yet raise `NotImplementedError`
+with a note on what to do, and their docstrings give the exact inputs and outputs.
 
 | Role | File to fill in | Command | Passes on |
 |---|---|---|---|
 | A: Data and baselines | `baseline.py`, `profiling.py` | `run_baseline.py`, `run_profile.py` | Baseline runs, profiling table |
-| B: Teacher | `teacher.py` | `run_teacher.py` | Teacher checkpoint and runs |
+| B: Teacher | `teacher.py`, `sweep.py`, `runs.py` | `run_teacher.py`, `sweep_teacher.py`, `soup_teacher.py` | Teacher checkpoint and runs |
 | C: Student | `distill.py` | `run_student.py` | Student checkpoint and runs |
 | D: Quantization | `quantize.py` | `run_quantize.py` | FP16 and INT8 models and runs |
 | E: Audit | `audit.py` | `run_audit.py` | Aggregate tables and figures |
 
-Files are in `src/compress_ecg/`, and commands are in `scripts/`. Three files are shared and
+Files are in `src/compress_ecg/`, and commands are in `scripts/`. The
+[Teacher guide](docs/teacher.md) lists the Teacher's other commands. Three files are shared and
 already work, so change them only after telling the team.
 
 - **`data.py`:** Loads the ECGs. Each batch has `waveform`, `tabular`, `labels`, and `label_mask`.
@@ -317,7 +322,7 @@ pytest -q tests/test_teacher.py
 | `notebooks/` | Exploration and figures |
 | `results/` | Aggregate metric tables and figures only |
 | `tests/` | Unit tests |
-| `docs/` | Proposal and reports |
+| `docs/` | Proposal, guides, and reports |
 
 ## External resources
 
