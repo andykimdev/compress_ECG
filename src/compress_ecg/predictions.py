@@ -26,7 +26,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 
-from .data import AUDIT_COLUMNS, LABEL_COLUMNS, EchoNextDataset, SHD_INDEX, find_metadata_file
+from .data import AUDIT_COLUMNS, LABEL_COLUMNS, PARTS, EchoNextDataset, SHD_INDEX, find_metadata_file
 
 # Each name owns one folder under runs/, so the audit can find every model.
 MODEL_NAMES = (
@@ -60,7 +60,8 @@ def run_dir(model_name: str, split: str, runs_root: str | Path = "runs") -> Path
 
     Args:
         model_name: One of MODEL_NAMES.
-        split: train, val, or test.
+        split: train, val, or test, or the fit or dev part of train. A part gets its own
+            folder, so its files are never mistaken for a run on the whole train split.
         runs_root: Parent folder. Use a separate one, such as runs/dummy, for dummy runs.
 
     Returns:
@@ -71,8 +72,8 @@ def run_dir(model_name: str, split: str, runs_root: str | Path = "runs") -> Path
     """
     if model_name not in MODEL_NAMES:
         raise ValueError(f"Unknown model {model_name!r}. Choose one of {MODEL_NAMES}")
-    if split not in ("train", "val", "test"):
-        raise ValueError("Choose train, val or test; no_split is excluded from experiments")
+    if split not in ("train", "val", "test", *PARTS):
+        raise ValueError("Choose train, val, test, fit or dev; no_split is excluded from experiments")
     return Path(runs_root) / model_name / split
 
 
@@ -110,13 +111,15 @@ def predict(
         if not torch.isfinite(logits).all():
             raise ValueError("Model produced non-finite logits")
         parts["logits"].append(logits.float().cpu().numpy())
+        # Copy every array. A view would keep a worker's shared-memory file open until the loop
+        # ends, and a large split with workers would pass the open-file limit.
         labels = batch["labels"].numpy().copy()
-        mask = batch["label_mask"].numpy()
+        mask = batch["label_mask"].numpy().copy()
         labels[~mask] = np.nan
         parts["labels"].append(labels)
         parts["label_mask"].append(mask)
         for key in ("row_id", "split_row"):
-            parts[key].append(batch[key].numpy())
+            parts[key].append(batch[key].numpy().copy())
         patient_keys.extend(batch["patient_key"])
     outputs = {key: np.concatenate(values) for key, values in parts.items()}
     outputs["probabilities"] = torch.sigmoid(torch.from_numpy(outputs["logits"])).numpy()
@@ -179,15 +182,18 @@ def run_manifest(model_name: str, dataset: EchoNextDataset, *, data_version: str
         **settings: Other values to record, such as batch_size and device.
 
     Returns:
-        A dictionary that can be written as JSON.
+        A dictionary that can be written as JSON. For a fit or dev part of train, split holds
+        the part's name and holdout holds the fraction and seed that rebuild the part.
     """
+    holdout = {"fraction": dataset.holdout_fraction, "seed": dataset.holdout_seed}
     return {
         "model": model_name,
         "code": _code_version(),
         "data_version": data_version,
         "data_dir": str(dataset.root),
         "metadata_sha256": sha256_file(find_metadata_file(dataset.root)),
-        "split": dataset.split,
+        "split": dataset.group,
+        **({"holdout": holdout} if dataset.part is not None else {}),
         "n_records": len(dataset),
         "label_columns": list(LABEL_COLUMNS),
         "sampling_rate_hz": 250,
@@ -277,14 +283,15 @@ def write_run(
         **manifest_values: Extra values to record, such as a checkpoint hash.
 
     Returns:
-        The folder that was written.
+        The folder that was written. A fit or dev part of train is saved under its own name,
+        and its metadata.csv and manifest carry that name as the split.
     """
-    destination = fresh_run_dir(run_dir(model_name, dataset.split, runs_root), dataset.root)
+    destination = fresh_run_dir(run_dir(model_name, dataset.group, runs_root), dataset.root)
     outputs = predict(model, dataset, batch_size=batch_size, num_workers=num_workers, device=device)
     manifest = run_manifest(
         model_name, dataset, batch_size=batch_size, num_workers=num_workers, device=device, **manifest_values,
     )
-    save_run(destination, outputs, dataset.selected_metadata, manifest)
+    save_run(destination, outputs, dataset.selected_metadata.assign(split=dataset.group), manifest)
     return destination
 
 

@@ -1,4 +1,8 @@
 import json
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,6 +28,23 @@ def test_predict_saves_logits_with_matching_probabilities(data_dir):
     expected = tabular[:, :1] * np.arange(1., 13.)
     np.testing.assert_allclose(outputs["logits"], expected, rtol=1e-6)
     np.testing.assert_allclose(outputs["probabilities"], 1 / (1 + np.exp(-expected)), rtol=1e-6)
+
+
+def test_predict_scores_in_evaluation_mode_even_when_the_model_arrives_in_training_mode(data_dir):
+    class WithDropout(RowDependent):
+        def __init__(self):
+            super().__init__()
+            self.dropout = nn.Dropout(0.5)
+
+        def forward(self, waveform, tabular):
+            return self.dropout(super().forward(waveform, tabular))
+
+    dataset = EchoNextDataset(data_dir, "val")
+    model = WithDropout().train()
+    outputs = predict(model, dataset, batch_size=2)
+    # Dropout in training mode would zero about half of these values and double the rest.
+    expected = np.load(dataset.tabular_path)[:, :1] * np.arange(1., 13.)
+    np.testing.assert_allclose(outputs["logits"], expected, rtol=1e-6)
 
 
 def test_model_with_wrong_output_shape_is_rejected(data_dir):
@@ -84,9 +105,71 @@ def test_run_dir_rejects_unknown_names(model, split):
         run_dir(model, split)
 
 
+@pytest.mark.parametrize("part", ["fit", "dev"])
+def test_a_part_of_training_gets_its_own_run_folder(part):
+    assert run_dir("teacher", part, "runs/pilot") == Path("runs/pilot/teacher") / part
+
+
+@pytest.mark.parametrize("part, expected_rows", [("dev", 2), ("fit", 3)])
+def test_run_of_a_part_is_saved_apart_from_the_training_run(holdout_dir, tmp_path, part, expected_rows):
+    dataset = EchoNextDataset(holdout_dir, "train", part=part, holdout_fraction=0.5, holdout_seed=0)
+    folder = write_run(RowDependent(), "teacher", dataset, runs_root=tmp_path)
+    assert folder == (tmp_path / "teacher" / part).resolve()
+    assert not (tmp_path / "teacher" / "train").exists()
+    run = load_run(folder)
+    assert len(run.metadata) == expected_rows
+    assert run.metadata["row_id"].tolist() == dataset.selected_metadata["row_id"].tolist()
+    # Neither record calls these ECGs train, so the run cannot pass for one on the whole split.
+    assert run.metadata["split"].tolist() == [part] * expected_rows
+    assert run.manifest["split"] == part
+    assert run.manifest["holdout"] == {"fraction": 0.5, "seed": 0}
+    assert run.manifest["n_records"] == expected_rows
+
+
+def test_run_of_the_whole_training_split_is_recorded_as_before(holdout_dir, tmp_path):
+    dataset = EchoNextDataset(holdout_dir, "train")
+    folder = write_run(RowDependent(), "teacher", dataset, runs_root=tmp_path)
+    assert folder == (tmp_path / "teacher" / "train").resolve()
+    run = load_run(folder)
+    assert run.metadata["split"].tolist() == ["train"] * 6
+    assert run.manifest["split"] == "train"
+    assert "holdout" not in run.manifest
+
+
 def test_synthetic_inputs_follow_call_format_and_repeat():
     waveform, tabular = synthetic_inputs(3, seed=1)
     assert waveform.shape == (3, 12, 2500)
     assert tabular.shape == (3, 7)
     assert waveform.dtype == tabular.dtype == torch.float32
     torch.testing.assert_close(waveform, synthetic_inputs(3, seed=1)[0])
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Only Linux counts shared-memory handles against the open-file limit")
+def test_scoring_many_batches_with_workers_stays_under_the_open_file_limit():
+    script = textwrap.dedent("""
+        import resource
+        import torch
+        from compress_ecg.predictions import predict
+
+        class Ecgs(torch.utils.data.Dataset):
+            def __len__(self):
+                return 600
+
+            def __getitem__(self, index):
+                return {
+                    "waveform": torch.zeros(12, 2500), "tabular": torch.zeros(7), "labels": torch.zeros(12),
+                    "label_mask": torch.ones(12, dtype=torch.bool), "row_id": index, "split_row": index,
+                    "patient_key": str(index),
+                }
+
+        class Zeros(torch.nn.Module):
+            def forward(self, waveform, tabular):
+                return torch.zeros(waveform.shape[0], 12)
+
+        # 600 batches of one ECG would keep 1,800 files open if every array stayed a view.
+        resource.setrlimit(resource.RLIMIT_NOFILE, (600, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
+        print(predict(Zeros(), Ecgs(), batch_size=1, num_workers=2)["logits"].shape)
+    """)
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=300)
+    assert result.returncode == 0, result.stderr[-400:]
+    assert result.stdout.strip() == "(600, 12)"
