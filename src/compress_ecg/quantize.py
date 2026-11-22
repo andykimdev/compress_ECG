@@ -13,11 +13,24 @@ Special Notes:
 
 from __future__ import annotations
 
+import copy #new: so we can copy a model w/out modifying original
+
 from pathlib import Path
 
 from torch import nn
 
 from .data import EchoNextDataset
+
+class FP16Inference(nn.Module):
+    """Run an FP16 model using the team's existing input/output interface."""
+
+    def __init__(self, model: nn.Module):
+        super().__init__()
+        self.model = copy.deepcopy(model).eval().half()
+
+    def forward(self, waveform, tabular):
+        logits = self.model(waveform.half(), tabular.half())
+        return logits.float()
 
 
 def to_fp16(student: nn.Module) -> nn.Module:
@@ -30,7 +43,7 @@ def to_fp16(student: nn.Module) -> nn.Module:
     Returns:
         The FP16 model, in the shared call format.
     """
-    raise NotImplementedError("Role D: convert to FP16")
+    return FP16Inference(student)
 
 
 def to_int8_post_training(student: nn.Module, calibration: EchoNextDataset) -> nn.Module:
