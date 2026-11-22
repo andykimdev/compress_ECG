@@ -16,6 +16,7 @@ import torch
 from torch.utils.data import Dataset
 
 SPLITS = ("train", "val", "test", "no_split")
+MODEL_SPLITS = SPLITS[:3]
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "echonext" / "1.1.1"
 LABEL_COLUMNS = (
     "lvef_lte_45_flag",
@@ -79,7 +80,7 @@ def read_metadata(data_dir: str | Path | None = None) -> pd.DataFrame:
         raise ValueError("Metadata contains missing patient_key values")
     # no_split can contain earlier ECGs from validation/test patients. Never treat
     # those rows as extra training examples or include them in this overlap check.
-    official = meta[meta["split"].isin(("train", "val", "test"))]
+    official = meta[meta["split"].isin(MODEL_SPLITS)]
     if official.groupby("patient_key")["split"].nunique().gt(1).any():
         raise ValueError("Patient leakage between official train/val/test splits")
     for split in ("val", "test"):
@@ -224,6 +225,7 @@ class EchoNextDataset(Dataset):
     Missing component labels are zero-filled ONLY alongside a False mask. Never
     include them in a loss/metric as negatives. The SHD label must be observed.
     Use the supplied tabular array; metadata echo measurements are never inputs.
+    Set load_waveforms=False to use tabular features and labels without ECG arrays.
 
     For pilot runs the train split can be served in two parts that share no patient.
     Pass part fit or dev with holdout_fraction and holdout_seed. See part_rows. The
@@ -234,10 +236,10 @@ class EchoNextDataset(Dataset):
 
     def __init__(
         self, data_dir: str | Path | None = None, split: str = "train", *,
-        limit: int | None = None, seed: int = 42, part: str | None = None,
+        limit: int | None = None, seed: int = 42, load_waveforms: bool = True, part: str | None = None,
         holdout_fraction: float = 0.0, holdout_seed: int = 0, patient_fraction: float = 1.0, patient_seed: int = 0,
     ):
-        if split not in ("train", "val", "test"):
+        if split not in MODEL_SPLITS:
             raise ValueError("Choose train, val or test; no_split is excluded from experiments")
         if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0):
             raise ValueError("limit must be a positive integer or None")
@@ -256,7 +258,7 @@ class EchoNextDataset(Dataset):
         self.seed = seed
         self.metadata = read_metadata(self.root).query("split == @split").reset_index(drop=True)
         self.metadata.insert(1, "split_row", np.arange(len(self.metadata), dtype=np.int64))
-        self.waveform_path = self.root / f"EchoNext_{split}_waveforms.npy"
+        self.waveform_path = self.root / f"EchoNext_{split}_waveforms.npy" if load_waveforms else None
         self.tabular_path = self.root / f"EchoNext_{split}_tabular_features.npy"
         self._waveforms = self._tabular = None
         self._pid = None
@@ -264,12 +266,13 @@ class EchoNextDataset(Dataset):
         count = len(self.metadata)
         if not count:
             raise ValueError(f"Official {split} split is empty")
-        if self._waveforms.shape != (count, 1, 2500, 12):
+        if self._waveforms is not None and self._waveforms.shape != (count, 1, 2500, 12):
             raise ValueError(f"Waveform shape must be {(count, 1, 2500, 12)}, got {self._waveforms.shape}")
-        if self._tabular.shape != (count, 7):
-            raise ValueError(f"Tabular shape must be {(count, 7)}, got {self._tabular.shape}")
+        tabular_shape = (count, len(TABULAR_COLUMNS))
+        if self._tabular.shape != tabular_shape:
+            raise ValueError(f"Tabular shape must be {tabular_shape}, got {self._tabular.shape}")
         for array in (self._waveforms, self._tabular):
-            if not np.issubdtype(array.dtype, np.number) or np.iscomplexobj(array):
+            if array is not None and (not np.issubdtype(array.dtype, np.number) or np.iscomplexobj(array)):
                 raise ValueError("Expected real numeric arrays")
         labels = self.metadata[list(LABEL_COLUMNS)].apply(pd.to_numeric, errors="raise").to_numpy(dtype=np.float32)
         if not (np.isnan(labels) | (labels == 0) | (labels == 1)).all():
@@ -291,8 +294,9 @@ class EchoNextDataset(Dataset):
 
     def _open_arrays(self):
         # Reopen after fork/spawn instead of copying multi-GB arrays to workers.
-        if self._pid != os.getpid() or self._waveforms is None:
-            self._waveforms = np.load(self.waveform_path, mmap_mode="r", allow_pickle=False)
+        if self._pid != os.getpid() or self._tabular is None:
+            if self.waveform_path is not None:
+                self._waveforms = np.load(self.waveform_path, mmap_mode="r", allow_pickle=False)
             self._tabular = np.load(self.tabular_path, mmap_mode="r", allow_pickle=False)
             self._pid = os.getpid()
 
@@ -308,13 +312,11 @@ class EchoNextDataset(Dataset):
         self._open_arrays()
         row = int(self.indices[index])
         # Copy one ECG so torch never shares read-only mmap storage.
-        waveform = np.array(self._waveforms[row, 0].T, dtype=np.float32, copy=True)
         tabular = np.array(self._tabular[row], dtype=np.float32, copy=True)
-        if not np.isfinite(waveform).all() or not np.isfinite(tabular).all():
-            raise ValueError(f"Non-finite input at {self.split} split row {row}")
+        if not np.isfinite(tabular).all():
+            raise ValueError(f"Non-finite input in tabular features at {self.split} split row {row}")
         record = self.metadata.iloc[row]
-        return {
-            "waveform": torch.from_numpy(waveform),
+        sample = {
             "tabular": torch.from_numpy(tabular),
             "labels": torch.from_numpy(self.labels[row].copy()),
             "label_mask": torch.from_numpy(self.label_mask[row].copy()),
@@ -322,6 +324,21 @@ class EchoNextDataset(Dataset):
             "split_row": row,
             "patient_key": str(record["patient_key"]),
         }
+        if self._waveforms is not None:
+            waveform = np.array(self._waveforms[row, 0].T, dtype=np.float32, copy=True)
+            if not np.isfinite(waveform).all():
+                raise ValueError(f"Non-finite input in waveform at {self.split} split row {row}")
+            sample["waveform"] = torch.from_numpy(waveform)
+        return sample
+
+    @property
+    def selected_tabular(self) -> np.ndarray:
+        """Return the seven features in dataset order for tabular model training or scoring."""
+        self._open_arrays()
+        features = self._tabular[self.indices].astype(np.float32, copy=False)
+        if not np.isfinite(features).all():
+            raise ValueError(f"Non-finite input in {self.split} tabular features")
+        return features
 
     @property
     def selected_metadata(self) -> pd.DataFrame:

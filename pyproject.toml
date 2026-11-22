@@ -7,10 +7,11 @@ name = "compress-ecg"
 version = "0.1.0"
 description = "EchoNext data loading and model compression experiments"
 requires-python = ">=3.10"
-dependencies = ["numpy", "pandas", "scikit-learn", "torch>=2.6", "matplotlib"]
+dependencies = ["numpy", "pandas", "scikit-learn", "torch>=2.6", "matplotlib", "psutil", "joblib"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
+onnx = ["onnx", "onnxruntime"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

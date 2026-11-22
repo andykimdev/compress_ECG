@@ -3,4 +3,6 @@ pandas
 scikit-learn
 torch>=2.6
 matplotlib
+psutil
+joblib
 pytest

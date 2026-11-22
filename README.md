@@ -172,12 +172,12 @@ calibration error and the Brier score, which is the average squared error of the
 
 ## Code map
 
-Each role fills in its own files. Functions that are not written yet raise `NotImplementedError`
+Each role owns the code in the table. Functions still in progress raise `NotImplementedError`
 with a note on what to do, and their docstrings give the exact inputs and outputs.
 
-| Role | File to fill in | Command | Passes on |
+| Role | Code | Command | Passes on |
 |---|---|---|---|
-| A: Data and baselines | `baseline.py`, `profiling.py` | `run_baseline.py`, `run_profile.py` | Baseline runs, profiling table |
+| A: Data and baselines | `data.py`, `baseline.py`, `profiling.py` | `run_baseline.py`, `run_profile.py` | Baseline runs, fitted tabular checkpoint, profiling table |
 | B: Teacher | `teacher.py`, `sweep.py`, `runs.py` | `run_teacher.py`, `sweep_teacher.py`, `soup_teacher.py` | Teacher checkpoint and runs |
 | C: Student | `distill.py` | `run_student.py` | Student checkpoint and runs |
 | D: Quantization | `quantize.py` | `run_quantize.py` | FP16 and INT8 models and runs |
@@ -229,8 +229,9 @@ your role's stand-in in that test with the real call.
 - **Done:** We downloaded the data, checked its hashes, and
   [summarized it](results/data_stats). The summary checks found no cleaning step we need.
 - **Done:** The shared code framework is in place, with one file for each role to fill in.
-- **Next:** Run EchoNext-Mini on the Test ECGs and see whether we get close to 82.0, which also
-  tests our data loading and evaluation code. Then add the gradient boosting baseline.
+- **Done on the Role A branch:** Mini inference, tabular gradient boosting, and synthetic-input
+  profiling are implemented. The baseline notebook runs both models against the same splits.
+- **Next:** Run both baselines on the real dataset and compare Mini's Test SHD AUROC with 82.0.
 - **Done:** The Teacher is fine-tuned and scores 85.15 SHD AUROC on Validation. The
   [Teacher guide](docs/teacher.md) covers how to download it and make its predictions.
 - **Not decided yet:** The one deployment device for steps 4 and 5.
@@ -305,14 +306,17 @@ source to a fixed version and checks every file against its SHA-256 hash.
 bash scripts/download_weights.sh
 ```
 
-To work on data loading or the EchoNext-Mini baseline only, a smaller download is enough. The
-[data and baseline guide](docs/data_and_baseline.md) covers input shapes and run files.
+For the baselines, use the [Role A notebook](notebooks/01_data_and_baseline.ipynb) with the
+existing private Kaggle dataset, or run the commands below with a local copy. The
+[Role A guide](docs/data_and_baseline.md) covers the Kaggle steps and which outputs go in Git.
 
 ```bash
 bash scripts/download_weights.sh --mini-only
 export ECHONEXT_DIR=/path/to/official/files
 python scripts/run_baseline.py --config configs/mini_baseline.json
-pytest -q
+python scripts/run_baseline.py --model mini --split test --limit 0
+python scripts/run_baseline.py --model gradient_boosting --split test --limit 0
+python scripts/run_profile.py --device cpu --output results/profiling/mini_cpu.csv
 ```
 
 ### Teacher setup
@@ -339,6 +343,8 @@ pytest -q tests/test_teacher.py
 | `configs/` | One config file per experiment |
 | `notebooks/` | Exploration and figures |
 | `results/` | Aggregate metric tables and figures only |
+| `runs/` | Private predictions and run metadata, ignored by Git |
+| `checkpoints/` | Private fitted models and downloaded weights, ignored by Git |
 | `tests/` | Unit tests |
 | `docs/` | Proposal, guides, and reports |
 

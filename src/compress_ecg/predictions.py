@@ -17,6 +17,8 @@ import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -198,8 +200,13 @@ def run_manifest(model_name: str, dataset: EchoNextDataset, *, data_version: str
         "label_columns": list(LABEL_COLUMNS),
         "sampling_rate_hz": 250,
         "preprocessing": "official preprocessed arrays; no additional normalization",
-        "waveform_file": {"name": dataset.waveform_path.name, "shape": list(dataset._waveforms.shape),
-                          "bytes": dataset.waveform_path.stat().st_size},
+        "waveform_file": (
+            None if dataset.waveform_path is None else {
+                "name": dataset.waveform_path.name,
+                "shape": list(dataset._waveforms.shape),
+                "bytes": dataset.waveform_path.stat().st_size,
+            }
+        ),
         "tabular_file": {"name": dataset.tabular_path.name, "shape": list(dataset._tabular.shape),
                          "bytes": dataset.tabular_path.stat().st_size},
         "versions": {"torch": torch.__version__, "numpy": np.__version__},
@@ -223,7 +230,7 @@ def fresh_run_dir(output_dir: str | Path, data_root: Path) -> Path:
         ValueError: When the folder is inside the dataset folder.
     """
     destination = Path(output_dir).expanduser().resolve()
-    if destination.exists() and any(destination.iterdir()):
+    if destination.exists() and (not destination.is_dir() or any(destination.iterdir())):
         raise FileExistsError(f"Output directory is not empty: {destination}")
     if destination == data_root or data_root in destination.parents:
         raise ValueError("Store outputs outside the source dataset directory")
@@ -232,6 +239,7 @@ def fresh_run_dir(output_dir: str | Path, data_root: Path) -> Path:
 
 def save_run(
     destination: Path, outputs: dict[str, np.ndarray], selected: pd.DataFrame, manifest: dict,
+    *, write_artifacts: Callable[[Path], None] | None = None,
 ) -> dict:
     """
     Write the four run files.
@@ -241,6 +249,7 @@ def save_run(
         outputs: The arrays in ARRAY_NAMES.
         selected: The scored rows from dataset.selected_metadata, in the same order.
         manifest: Output of run_manifest, plus any model-specific values.
+        write_artifacts: Optional writer for additional private files in the run.
 
     Returns:
         The basic metrics that were saved.
@@ -256,11 +265,22 @@ def save_run(
     metrics = basic_metrics(outputs)
     columns = ["row_id", "split_row", "patient_key", "split"]
     columns += [column for column in AUDIT_COLUMNS if column in selected]
-    destination.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(destination / "predictions.npz", **outputs)
-    selected[columns].to_csv(destination / "metadata.csv", index=False)
-    for filename, value in (("manifest.json", manifest), ("metrics.json", metrics)):
-        (destination / filename).write_text(json.dumps(value, indent=2, allow_nan=False) + "\n")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=f".{destination.name}-", dir=destination.parent) as temporary:
+        staging = Path(temporary)
+        np.savez_compressed(staging / "predictions.npz", **outputs)
+        selected[columns].to_csv(staging / "metadata.csv", index=False)
+        for filename, value in (("manifest.json", manifest), ("metrics.json", metrics)):
+            (staging / filename).write_text(json.dumps(value, indent=2, allow_nan=False) + "\n")
+        if write_artifacts is not None:
+            write_artifacts(staging)
+        # Commit the whole run together. An already completed run cannot be replaced.
+        try:
+            staging.rename(destination)
+        except OSError as error:
+            if destination.is_dir() and any(destination.iterdir()):
+                raise FileExistsError(f"Output directory is not empty: {destination}") from error
+            raise
     return metrics
 
 

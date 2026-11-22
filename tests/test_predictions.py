@@ -10,7 +10,7 @@ import torch
 from torch import nn
 
 from compress_ecg.data import EchoNextDataset, LABEL_COLUMNS
-from compress_ecg.predictions import aligned_logits, load_run, predict, run_dir, write_run
+from compress_ecg.predictions import aligned_logits, load_run, predict, run_dir, run_manifest, save_run, write_run
 from compress_ecg.profiling import synthetic_inputs
 
 
@@ -73,6 +73,24 @@ def test_second_write_to_same_run_is_refused(data_dir, tmp_path):
     write_run(RowDependent(), "student", dataset, runs_root=tmp_path)
     with pytest.raises(FileExistsError):
         write_run(RowDependent(), "student", dataset, runs_root=tmp_path)
+
+
+def test_failed_artifact_write_leaves_run_retryable(data_dir, tmp_path):
+    dataset = EchoNextDataset(data_dir, "val")
+    destination = tmp_path / "run"
+    destination.mkdir()
+    outputs = predict(RowDependent(), dataset)
+    manifest = run_manifest("student", dataset)
+
+    def fail(staging):
+        (staging / "checkpoint").write_text("partial")
+        raise OSError("checkpoint failed")
+
+    with pytest.raises(OSError, match="checkpoint failed"):
+        save_run(destination, outputs, dataset.selected_metadata, manifest, write_artifacts=fail)
+    assert not list(destination.iterdir())
+    save_run(destination, outputs, dataset.selected_metadata, manifest)
+    assert load_run(destination).manifest["n_records"] == len(dataset)
 
 
 def test_load_rejects_predictions_that_do_not_match_metadata(data_dir, tmp_path):

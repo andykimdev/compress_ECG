@@ -3,14 +3,16 @@ import json
 import subprocess
 import sys
 
+import joblib
 import numpy as np
+import pandas as pd
 import pytest
 import torch
 from torch import nn
 
 import compress_ecg.baseline as baseline
 from compress_ecg import predictions
-from compress_ecg.data import EchoNextDataset, LABEL_COLUMNS
+from compress_ecg.data import EchoNextDataset, LABEL_COLUMNS, SHD_INDEX
 
 
 class KnownLogits(nn.Module):
@@ -111,3 +113,44 @@ def test_cli_with_released_model(data_dir, tmp_path, released_model):
     result = json.loads(completed.stdout)
     assert result["n_records"] == 3
     assert json.loads((output / "manifest.json").read_text())["requested_limit"] == 3
+
+
+def test_tabular_cli_learns_and_saves_a_reusable_model_without_waveforms(data_dir, tmp_path):
+    metadata_path = data_dir / "EchoNext_metadata_100k.csv"
+    metadata = pd.read_csv(metadata_path)
+    training = metadata[metadata["split"].eq("train")].copy()
+    training[LABEL_COLUMNS[0]] = np.nan
+    training[LABEL_COLUMNS[1]] = 0
+    training = pd.concat([training] * 10, ignore_index=True)
+    metadata = pd.concat([training, metadata[metadata["split"].ne("train")]], ignore_index=True)
+    metadata.to_csv(metadata_path, index=False)
+    for waveform_path in data_dir.glob("*_waveforms.npy"):
+        waveform_path.unlink()
+    for split in ("train", "val"):
+        rows = metadata[metadata["split"].eq(split)]
+        features = np.zeros((len(rows), 7), dtype=np.float32)
+        features[:, 0] = rows[LABEL_COLUMNS[SHD_INDEX]]
+        np.save(data_dir / f"EchoNext_{split}_tabular_features.npy", features)
+
+    runs_root = tmp_path / "runs"
+    completed = subprocess.run([
+        sys.executable, "scripts/run_baseline.py", "--model", "gradient_boosting",
+        "--data-dir", str(data_dir), "--split", "val", "--limit", "0", "--runs-root", str(runs_root),
+    ], capture_output=True, text=True, check=True)
+    assert json.loads(completed.stdout)["shd"]["auroc"] == 1.0
+    destination = predictions.run_dir("gradient_boosting", "val", runs_root)
+    run = predictions.load_run(destination)
+    assert run.manifest["n_train_records"] == 60
+    assert run.manifest["waveform_file"] is None
+    assert run.manifest["training_counts"][LABEL_COLUMNS[0]]["n_observed"] == 0
+    assert run.manifest["training_counts"][LABEL_COLUMNS[1]]["n_positive"] == 0
+    assert np.isnan(run.arrays["labels"][~run.arrays["label_mask"]]).all()
+    assert np.isfinite(run.arrays["logits"]).all()
+    np.testing.assert_array_equal(run.arrays["probabilities"][:, 0], 0.5)
+    assert (run.arrays["probabilities"][:, 1] < 1e-6).all()
+
+    model = joblib.load(destination / baseline.GRADIENT_BOOSTING_CHECKPOINT)
+    val = EchoNextDataset(data_dir, "val", load_waveforms=False)
+    np.testing.assert_array_equal(baseline.predict_gradient_boosting(model, val)["logits"], run.arrays["logits"])
+    with pytest.raises(ValueError, match="official train split"):
+        baseline.fit_gradient_boosting(val)

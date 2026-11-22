@@ -1,28 +1,39 @@
-# A: data loading and released Mini baseline
+# Role A: data, baselines, and profiling
 
-A's first target is a repeatable run on about **1,000 validation ECGs**, using the
-official arrays and released weights. This supplies the shared loader to B/C and
-aligned predictions to E. It does not train a teacher/student or quantize Mini;
-those belong to B/C/D. The private Kaggle dataset is assumed to be uploaded already.
+A's first target is a repeatable run on **1,000 validation ECGs**. The full run scores both
+baselines on all Validation and Test ECGs. Mini uses the released weights. Gradient boosting
+fits the seven supplied tabular features on Training ECGs. B/C use the loader, and E receives
+the aligned prediction files. Profiling uses synthetic inputs and runs independently of the data.
 
 ## Run on Kaggle
 
-1. Upload/open `notebooks/01_data_and_baseline.ipynb` in a **private** notebook.
-2. Attach the team's private EchoNext dataset. Preserve the original filenames
-   and row ordering; extract archives before using the loader.
-3. Enable Internet for the repository, dependencies, and public Mini downloads.
-   CPU works; optionally enable a GPU. The notebook selects CUDA when available.
-4. Run the setup cells. They clone `shaurya/data-loader-and-baselines` and install
-   the shared package. The implementation must first be committed/pushed to that
-   branch for Kaggle to retrieve it. For exact repeats, set `CODE_COMMIT` to its SHA.
-5. The notebook locates the metadata file under `/kaggle/input`. If several copies
-   are attached, set `DATA_DIR` to the directory containing the official files.
-6. Run the batch check, then Mini. Save the completed notebook version and its
-   outputs privately. Another teammate should repeat this from their own account.
+1. Push the code branch with `git push -u origin shaurya/role-a-baselines`. The notebook
+   clones this branch in its first cell. Set `CODE_COMMIT` to the pushed SHA for exact repeats.
+2. Upload/open `notebooks/01_data_and_baseline.ipynb` in a **private** Kaggle notebook.
+   Attach the existing private EchoNext dataset. Keep the original filenames and order.
+3. Enable Internet for the code and Mini weights. GitHub requires a token
+   that can read the private `andykimdev/compress_ECG` repository. In Kaggle **Add-ons → Secrets**,
+   add it as `GITHUB_TOKEN` and grant the notebook access. A fine-grained token needs
+   **Contents: Read-only** for this repository. If your collaborator account cannot select
+   the repository for a fine-grained token, use a short-lived classic token with `repo` scope.
+   The setup cell reads the secret at runtime. The notebook uses CUDA for Mini when a GPU
+   is enabled, and gradient boosting runs on CPU.
+4. Leave `RUN_MODE = 'smoke'` and run all cells. The notebook locates the data under
+   `/kaggle/input`. If discovery fails, set `DATA_DIR` to the folder with the metadata CSV.
+   Check that both models report finite `(1000, 12)` probabilities.
+5. Change `RUN_MODE` to `'full'` and save a private version that runs all cells. The two
+   models each score **4,626 Validation** and **5,442 Test** ECGs for the full 1.1.1 release.
+   Gradient boosting refits on the same official Training ECGs for each split, with the
+   same settings and seed. Compare Mini's Test SHD AUROC to the published **0.820** reference.
+6. Keep the completed private version and its `runs/` output. Download the aggregate files
+   under `results/baselines/` and place them in the repository's `results/baselines/`.
 
-The notebook is a thin launcher: the reusable implementation lives in `data.py`
-and `baseline.py`. When updating notebook cells in Kaggle, clear outputs before
-committing the `.ipynb` back to GitHub. The notebook never synchronizes automatically.
+The notebook imports the shared Python package directly from the checkout and uses Kaggle's
+preinstalled dependencies. If a previous run installed dependencies and PyTorch now fails to
+import, stop that Kaggle session and start a fresh one before rerunning the updated setup cell.
+When updating notebook cells in Kaggle,
+clear outputs before committing the `.ipynb` to GitHub. On an interactive repeat, use a
+fresh `RUNS_ROOT` if the destination already holds a completed run.
 
 ## Run locally or from a Kaggle terminal
 
@@ -36,6 +47,8 @@ bash scripts/download_weights.sh --mini-only
 
 export ECHONEXT_DIR=/path/to/directory/containing/the/official/files
 python scripts/run_baseline.py --config configs/mini_baseline.json
+python scripts/run_baseline.py --model mini --split test --limit 0
+python scripts/run_baseline.py --model gradient_boosting --split test --limit 0
 pytest -q
 ```
 
@@ -44,25 +57,30 @@ verifying both SHA-256 hashes. It avoids the tutorial's legacy Lightning stack.
 Without `--mini-only`, the downloader also fetches the two teacher candidates.
 No dataset is downloaded or uploaded by these scripts.
 
-CLI flags override JSON configuration values. For example, on Kaggle:
+CLI flags override JSON configuration values. For example, from a Kaggle terminal in
+the cloned repository:
 
 ```bash
 python scripts/run_baseline.py \
   --config configs/mini_baseline.json \
   --data-dir /kaggle/input/YOUR-DATASET/ACTUAL-FILE-ROOT \
-  --output-dir /kaggle/working/runs/mini_val_1000_seed42 \
+  --runs-root /kaggle/working/runs/smoke \
   --device cuda
 ```
 
-Use `--device cpu` without a GPU. `--limit 0` runs a full split; defaults are
-validation, 1,000 ECGs, seed 42, batch size 64, and zero data-loader workers.
-Sampling is without replacement and selected split indices are sorted back into
-their original order. `--split test --limit 0` is available for the final locked
-evaluation. The paper's 0.820 SHD AUROC is not an expected result on a small
-validation subset. No clinical performance result is claimed by synthetic tests.
+Use `--device cpu` without a GPU. The CLI defaults to up to 1,000 Validation ECGs, seed 42,
+Mini batch size 64, and zero loader workers. `--limit 0` scores the entire split. By default,
+full runs go to `runs/<model>/<split>/` and limited runs go to `runs/smoke/<model>/<split>/`.
+Use `--split val --limit 0` for full Validation results or `--split train --limit 0` to create
+Mini predictions for a distillation dry run. Use `--runs-root runs/dummy` for those dummy
+predictions. `--train-limit` optionally caps gradient boosting training for a quick check.
+Each run requires a fresh or empty output directory outside the source data folder.
 
-Each run requires a fresh or empty output directory. Save outputs outside the
-source data directory. Nothing modifies `/kaggle/input` or refits preprocessing.
+Gradient boosting needs the metadata CSV and only the Training and requested scoring
+split's `*_tabular_features.npy` files. It uses observed labels and fits independent
+histogram gradient-boosted classifiers with a fixed seed. Outputs with one observed
+class use that class frequency. Outputs with no training labels use probability 0.5.
+The manifest records observed and positive training counts for each label.
 
 ## Expected files and alignment
 
@@ -81,7 +99,7 @@ EchoNext_no_split_waveforms.npy          # released but never used for experimen
 EchoNext_no_split_tabular_features.npy   # released but never used for experiments
 ```
 
-Only the requested split's two arrays are opened. Each waveform file is
+For Mini, only the requested split's two arrays are opened. Each waveform file is
 `[N, 1, 2500, 12]`; each tabular file is `[N, 7]`. To align labels, filter the
 metadata by its exact `split` value **without sorting**. The first filtered row
 corresponds to array row 0 for that split, and so on. A metadata CSV export column
@@ -159,6 +177,7 @@ The following files go to the private run directory (default `runs/`, git-ignore
 | `metadata.csv` | Aligned IDs, split, and available race/ethnicity, sex, age, and care-setting fields |
 | `manifest.json` | Code commit/dirty flag, model/source hashes, data version/path, metadata hash, sampling settings, array shapes/sizes, and runtime versions |
 | `metrics.json` | Per-output observed/positive counts, AUROC, and Brier score |
+| `gradient_boosting.joblib` | Fitted model, saved only in gradient boosting runs |
 
 `probabilities`, `labels`, and `label_mask` have shape `[N, 12]`. The last column
 is the composite SHD output, not the maximum of the other 11 probabilities.
@@ -200,6 +219,38 @@ check, with no confidence intervals or fairness conclusions. Keep patient-level
 outputs and notebook versions private; only reviewed aggregate tables/figures
 belong in the repository's `results/` directory.
 
+For the Kaggle full run, preserve all four `runs/<model>/<split>/` folders in the private
+notebook output. E can attach that output and read the folders with `predictions.load_run`.
+Keep the gradient boosting checkpoint there or download it to the ignored
+`checkpoints/baselines/` directory. To reproduce a saved model's predictions, load your
+checkpoint with `joblib.load` and pass it to `predict_gradient_boosting`. Use the scikit-learn
+version recorded in its run manifest. Mini's checkpoint can be re-downloaded with
+`bash scripts/download_weights.sh --mini-only`.
+
+## Profile Mini on the deployment machine
+
+Install the package and download Mini first. This command creates the aggregate table on CPU:
+
+```bash
+python scripts/run_profile.py --device cpu --batch-sizes 1 8 32 64 \
+  --output results/profiling/mini_cpu.csv
+```
+
+To compare PyTorch eager, TorchInductor, and ONNX Runtime on CPU:
+
+```bash
+pip install -e '.[onnx]'
+python scripts/run_profile.py --device cpu --backends eager compile onnx \
+  --trace-dir runs/profiling/traces --output results/profiling/mini_cpu_backends.csv
+```
+
+Add `--student checkpoints/student.pt` when the width-5 checkpoint is available. Each row
+reports warmed latency, throughput, model artifact size, sampled process RSS, and peak CUDA
+allocation on CUDA runs. The timers exclude compilation and export, which are recorded in
+`setup_seconds`. The sampled RSS includes runtime caches and may miss brief spikes. The
+ONNX export uses fixed batch shapes and is checked against eager logits before timing.
+Keep profiler traces under `runs/` and commit reviewed aggregate CSVs under `results/profiling/`.
+
 ## Verification and acceptance
 
 `pytest -q` uses synthetic files with interleaved metadata to check array/label
@@ -208,6 +259,7 @@ memory-map serialization, and output contracts. With Mini downloaded, it also
 compares adapter predictions against the original upstream model and exercises
 the CLI using the released checkpoint. Those two tests skip if weights are absent.
 
-Real-data acceptance remains a Kaggle run: another teammate loads a batch, runs
-the 1,000-validation-ECG notebook, confirms finite `[1000, 12]` probabilities,
-and gives E the private output directory and exact code/data version identifiers.
+The synthetic tests also train and reload gradient boosting, run the tabular CLI with
+no waveform files, and check that a failed checkpoint write leaves the run retryable.
+For real-data acceptance, run the private Kaggle notebook in both modes and give E the
+full run folders and exact code/data version identifiers.

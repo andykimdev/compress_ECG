@@ -1,0 +1,84 @@
+{
+  "model": "gradient_boosting",
+  "split": "val",
+  "n_records": 4626,
+  "code": {
+    "commit": "25fd11a37af40a31c1d3133bdd4cb3eb800171c4",
+    "dirty": false
+  },
+  "data_version": "1.1.1",
+  "metrics": {
+    "lvef_lte_45_flag": {
+      "n_observed": 4626,
+      "n_positive": 866,
+      "auroc": 0.761472716328436,
+      "brier": 0.13050106418281154
+    },
+    "lvwt_gte_13_flag": {
+      "n_observed": 4626,
+      "n_positive": 877,
+      "auroc": 0.6855339302947528,
+      "brier": 0.14552300751338462
+    },
+    "aortic_stenosis_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 252,
+      "auroc": 0.8374431162497007,
+      "brier": 0.04562499557142772
+    },
+    "aortic_regurgitation_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 62,
+      "auroc": 0.6232824913064374,
+      "brier": 0.013402656706487864
+    },
+    "mitral_regurgitation_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 282,
+      "auroc": 0.7633301170278071,
+      "brier": 0.054559547425828844
+    },
+    "tricuspid_regurgitation_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 305,
+      "auroc": 0.7537284553894248,
+      "brier": 0.059026493806890304
+    },
+    "pulmonary_regurgitation_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 21,
+      "auroc": 0.6092549506230288,
+      "brier": 0.00479729362233072
+    },
+    "rv_systolic_dysfunction_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 368,
+      "auroc": 0.7566508439357117,
+      "brier": 0.06997364633486686
+    },
+    "pericardial_effusion_moderate_large_flag": {
+      "n_observed": 4626,
+      "n_positive": 52,
+      "auroc": 0.6313801251219265,
+      "brier": 0.012192040876197468
+    },
+    "pasp_gte_45_flag": {
+      "n_observed": 4626,
+      "n_positive": 581,
+      "auroc": 0.6848264681540925,
+      "brier": 0.1093550739347509
+    },
+    "tr_max_gte_32_flag": {
+      "n_observed": 4626,
+      "n_positive": 267,
+      "auroc": 0.6721321335254539,
+      "brier": 0.05622688144004574
+    },
+    "shd_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 1990,
+      "auroc": 0.7442716236722308,
+      "brier": 0.2064182779677513
+    }
+  }
+}
