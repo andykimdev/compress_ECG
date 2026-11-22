@@ -1,0 +1,109 @@
+{
+  "model": "teacher",
+  "checkpoint": "checkpoints/teacher/runs/soup6_lr1e-05_hlr0.0001_do0.5_tab_ema0.999_ev4_byshd/best.pt",
+  "checkpoint_sha256": "1db5e09cc7737213c4b1661541eda81508e4330e761a34fd9d25dc26c19fc084",
+  "parameters": 90383340,
+  "code": {
+    "commit": "cf408478cdc3eb653e7a1b66288f9b2a7a301a61",
+    "dirty": null
+  },
+  "torch": "2.14.1+cu130",
+  "split": "val",
+  "device": "cuda",
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "warmup": 10,
+  "repeats": 50,
+  "timed": "The model's forward pass on a batch that is already on the device. Reading from disk and data loading are not timed.",
+  "peak_gpu_memory": "Bytes from torch.cuda.max_memory_allocated over the warm-up and timed calls of one row. The model's weights and the input batch are included.",
+  "weights_gpu_memory_bytes": 361540608,
+  "rows": [
+    {
+      "precision": "fp32",
+      "batch_size": 1,
+      "repeats": 50,
+      "ms_per_batch": 5.5008,
+      "ms_per_ecg": 5.5008,
+      "ms_per_ecg_p5": 5.4879,
+      "ms_per_ecg_p95": 5.5608,
+      "ecgs_per_second": 181.7919,
+      "peak_gpu_memory_bytes": 427931136
+    },
+    {
+      "precision": "fp32",
+      "batch_size": 8,
+      "repeats": 50,
+      "ms_per_batch": 12.4786,
+      "ms_per_ecg": 1.5598,
+      "ms_per_ecg_p5": 1.5582,
+      "ms_per_ecg_p95": 1.5786,
+      "ecgs_per_second": 641.0952,
+      "peak_gpu_memory_bytes": 587945472
+    },
+    {
+      "precision": "fp32",
+      "batch_size": 64,
+      "repeats": 50,
+      "ms_per_batch": 75.8187,
+      "ms_per_ecg": 1.1847,
+      "ms_per_ecg_p5": 1.1841,
+      "ms_per_ecg_p95": 1.1861,
+      "ecgs_per_second": 844.1189,
+      "peak_gpu_memory_bytes": 1912047104
+    },
+    {
+      "precision": "fp32",
+      "batch_size": 256,
+      "repeats": 50,
+      "ms_per_batch": 305.752,
+      "ms_per_ecg": 1.1943,
+      "ms_per_ecg_p5": 1.1918,
+      "ms_per_ecg_p95": 1.2029,
+      "ecgs_per_second": 837.28,
+      "peak_gpu_memory_bytes": 6458591744
+    },
+    {
+      "precision": "bf16",
+      "batch_size": 1,
+      "repeats": 50,
+      "ms_per_batch": 5.1314,
+      "ms_per_ecg": 5.1314,
+      "ms_per_ecg_p5": 5.1013,
+      "ms_per_ecg_p95": 5.2063,
+      "ecgs_per_second": 194.8784,
+      "peak_gpu_memory_bytes": 430729728
+    },
+    {
+      "precision": "bf16",
+      "batch_size": 8,
+      "repeats": 50,
+      "ms_per_batch": 5.017,
+      "ms_per_ecg": 0.6271,
+      "ms_per_ecg_p5": 0.624,
+      "ms_per_ecg_p95": 0.6339,
+      "ecgs_per_second": 1594.5641,
+      "peak_gpu_memory_bytes": 586372608
+    },
+    {
+      "precision": "bf16",
+      "batch_size": 64,
+      "repeats": 50,
+      "ms_per_batch": 29.6677,
+      "ms_per_ecg": 0.4636,
+      "ms_per_ecg_p5": 0.4632,
+      "ms_per_ecg_p95": 0.4637,
+      "ecgs_per_second": 2157.2285,
+      "peak_gpu_memory_bytes": 1915192832
+    },
+    {
+      "precision": "bf16",
+      "batch_size": 256,
+      "repeats": 50,
+      "ms_per_batch": 130.8752,
+      "ms_per_ecg": 0.5112,
+      "ms_per_ecg_p5": 0.511,
+      "ms_per_ecg_p95": 0.5114,
+      "ecgs_per_second": 1956.0618,
+      "peak_gpu_memory_bytes": 6458591744
+    }
+  ]
+}
