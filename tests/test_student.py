@@ -2,6 +2,9 @@ import pytest
 import torch
 
 from compress_ecg.baseline import DEFAULT_MINI_DIR
+from compress_ecg.data import EchoNextDataset
+from compress_ecg.distill import train_student
+from compress_ecg.predictions import load_run, write_run
 from compress_ecg.profiling import synthetic_inputs
 from compress_ecg.student import build_student, load_student, save_student
 
@@ -29,3 +32,15 @@ def test_saved_student_gives_the_same_outputs(released_code, tmp_path):
     loaded = load_student(save_student(student, tmp_path / "nested" / "student.pt"))
     inputs = synthetic_inputs(2)
     torch.testing.assert_close(student(*inputs), loaded(*inputs))
+
+
+def test_trained_student_loads_for_quantization(released_code, data_dir, tmp_path):
+    # run_quantize.py --student reads the checkpoint that train_student writes.
+    torch.manual_seed(0)
+    train, val = EchoNextDataset(data_dir, "train"), EchoNextDataset(data_dir, "val")
+    teacher_run = load_run(write_run(build_student().eval(), "teacher", train, runs_root=tmp_path / "runs"))
+    student = build_student()
+    checkpoint = train_student(student, teacher_run, train, val, tmp_path / "student", batch_size=2, max_epochs=1)
+    loaded = load_student(checkpoint)
+    inputs = synthetic_inputs(2)
+    torch.testing.assert_close(student.eval()(*inputs), loaded(*inputs))
