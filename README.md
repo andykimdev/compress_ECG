@@ -83,13 +83,31 @@ The terms in this table mean the following.
 
 ### Baselines
 
-A result only means something next to a simpler option, so we compare against two.
+A result only means something next to a simpler option, so we compare against three.
 
 - **EchoNext-Mini:** The released weights, 1.05M parameters.
 - **Gradient boosting:** A standard non-neural model that uses only the 7 extra numbers.
+- **Logistic regression:** A linear model on 45 inputs: the 7 extra numbers, 2 flags that mark a
+  filled-in PR interval or atrial rate, and 3 voltage summaries for each of the 12 leads.
 
 **The Teacher must beat EchoNext-Mini.** If it does not, then a Student that copies it has
 little value, however fast it runs.
+
+On the 4,626 Validation ECGs it does. The Teacher scores 85.15 SHD AUROC and EchoNext-Mini scores
+81.48, a lead of 3.67 points. Redrawing the patients 2,000 times, with the same patients for both
+models, puts the lead between 2.87 and 4.45 points 95% of the time. The numbers are in
+[`results/teacher/val_gap_teacher_vs_mini.json`](results/teacher/val_gap_teacher_vs_mini.json),
+and `scripts/compare_runs.py` makes them from any two saved runs.
+
+Two limits apply. The Teacher's settings were tuned on Validation and EchoNext-Mini's were not, so
+the lead runs slightly high. The Test ECGs give the clean comparison, and they are scored once,
+at the end.
+
+Logistic regression scores 77.29 on the same Validation ECGs, 4.18 points below EchoNext-Mini,
+with the gap between 3.19 and 5.17 points 95% of the time
+([`results/baselines/val_gap_logistic_vs_mini.json`](results/baselines/val_gap_logistic_vs_mini.json)).
+Its regularization strength was also picked on Validation. `scripts/run_linear.py` fits it on a
+CPU in under a minute.
 
 ### Profiling tools
 

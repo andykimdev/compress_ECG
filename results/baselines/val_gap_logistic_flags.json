@@ -1,0 +1,20 @@
+{
+  "split": "val",
+  "model_a": "logistic_regression",
+  "model_b": "logistic_regression_no_flags",
+  "seed": 0,
+  "label": "shd_moderate_or_greater_flag",
+  "auroc_a": 0.7729,
+  "auroc_b": 0.7711,
+  "gap": 0.0018,
+  "auroc_a_low": 0.7591,
+  "auroc_a_high": 0.7869,
+  "auroc_b_low": 0.7572,
+  "auroc_b_high": 0.785,
+  "gap_low": 0.0008,
+  "gap_high": 0.0028,
+  "share_a_ahead": 1.0,
+  "n_ecgs": 4626,
+  "n_patients": 4626,
+  "n_resamples": 2000
+}
