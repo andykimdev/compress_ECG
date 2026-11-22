@@ -2,6 +2,7 @@
 """Role D: make the FP16 and INT8 models and save their predictions. Install first: pip install -e ."""
 
 import argparse
+import copy
 
 from compress_ecg.baseline import load_mini
 from compress_ecg.data import EchoNextDataset
@@ -23,10 +24,13 @@ def main(argv: list[str] | None = None) -> None:
     source = load_student(args.student, device=args.device) if args.student else load_mini(device=args.device)
     train = EchoNextDataset(args.data_dir, "train")
     val = EchoNextDataset(args.data_dir, "val")
+    # Each conversion gets its own copy, since some, such as half(), change a model in place.
     conversions = {
-        "student_fp16": lambda: to_fp16(source),
-        "student_int8_post": lambda: to_int8_post_training(source, train),
-        "student_int8_qat": lambda: train_int8_quant_aware(source, train, val, args.output_dir, device=args.device),
+        "student_fp16": lambda: to_fp16(copy.deepcopy(source)),
+        "student_int8_post": lambda: to_int8_post_training(copy.deepcopy(source), train),
+        "student_int8_qat": lambda: train_int8_quant_aware(
+            copy.deepcopy(source), train, val, args.output_dir, device=args.device,
+        ),
     }
     datasets = [val] + ([EchoNextDataset(args.data_dir, "test")] if args.with_test else [])
     for name, convert in conversions.items():
