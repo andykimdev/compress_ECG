@@ -230,7 +230,9 @@ Until a real input is ready, use the released EchoNext-Mini as a dummy, and keep
 `runs/dummy/`. Dummy numbers only show that code works, so they never go in the report.
 
 - **Role C:** Train from EchoNext-Mini's saved predictions on the Training ECGs.
-- **Role D:** Run `run_quantize.py` without `--student`, which converts EchoNext-Mini.
+- **Role D:** Run `run_quantize.py` without `--student`, which converts EchoNext-Mini. Once a
+  Student checkpoint exists, pass it with `--student`. Both `run_student.py` and notebook 03 save
+  it as `best_student.pt`, in the format `student.load_student` reads.
 - **Role E:** Build the scorecard on EchoNext-Mini's saved predictions.
 
 `tests/test_pipeline.py` runs every handoff on synthetic ECGs. When your code is ready, replace
@@ -353,7 +355,7 @@ For Role C experiments, open
 [`notebooks/03_student_distillation.ipynb`](notebooks/03_student_distillation.ipynb).
 It starts with a two-epoch Mini stand-in run, caches Mini predictions, plots learning
 curves, and compares validation metrics. Dataset limits and training settings are
-configured in notebook cells; the loss and training loop remain in `src/`.
+configured in notebook cells. The loss and training loop remain in `src/`.
 Notebook number 02 is reserved for Teacher training. Set the Teacher source and
 saved-run paths in notebook 03 when the real Teacher is ready.
 
