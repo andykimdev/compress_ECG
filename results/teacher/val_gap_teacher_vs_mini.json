@@ -1,0 +1,20 @@
+{
+  "split": "val",
+  "model_a": "teacher",
+  "model_b": "EchoNext-Mini",
+  "seed": 0,
+  "label": "shd_moderate_or_greater_flag",
+  "auroc_a": 0.8515,
+  "auroc_b": 0.8148,
+  "gap": 0.0367,
+  "auroc_a_low": 0.8399,
+  "auroc_a_high": 0.8622,
+  "auroc_b_low": 0.8024,
+  "auroc_b_high": 0.8269,
+  "gap_low": 0.0287,
+  "gap_high": 0.0445,
+  "share_a_ahead": 1.0,
+  "n_ecgs": 4626,
+  "n_patients": 4626,
+  "n_resamples": 2000
+}
