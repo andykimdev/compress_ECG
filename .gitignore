@@ -15,8 +15,12 @@ checkpoints/
 *.engine
 *.joblib
 wandb/
-runs/
+/runs/
 results/dummy_audit/
+# Student aggregate tables may be committed; per-ECG predictions and caches may not.
+results/student/**/predictions/
+results/student/mini_cache/
+results/student/**/metadata.csv
 
 # Python
 __pycache__/
