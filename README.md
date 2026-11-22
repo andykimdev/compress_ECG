@@ -158,7 +158,8 @@ This gives the following sizes, counted from the released model code.
 
 ## How we judge a model
 
-After each step, we check three things on the Test ECGs.
+After each step, we check three things on the Validation ECGs. The Test ECGs are scored once, at
+the end, so no choice is made on them.
 
 - **Accuracy:** Compressing the Student should keep its SHD AUROC within about 2 points of the
   Teacher.
