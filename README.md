@@ -1,6 +1,6 @@
 # compress_ECG
 
-**Master plan, last updated November 5, 2026.** This file replaces the plan in our original
+**Master plan, last updated November 20, 2026.** This file replaces the plan in our original
 [proposal](docs/proposal.pdf) wherever the two differ.
 
 We are shrinking a heart disease detection model so it can run on small devices, without making
@@ -63,7 +63,7 @@ Each step produces the input for the next step.
 | Step | What we do | What it makes |
 |---|---|---|
 | 1. Data | Use the 100,000 EchoNext-Mini ECGs and their official splits | No model yet |
-| 2. Teacher | Add an output layer to ECG-FM, then fine-tune it with mixed precision | Teacher |
+| 2. Teacher | Add an output layer to ECG-FM that also reads the 7 extra numbers, fine-tune 6 runs with dropout and mixed precision, then average their weights | Teacher |
 | 3. Student | Train the Mini design at width 5 to copy the Teacher | Student |
 | 4. Quantize | Convert to FP16, INT8 post-training, and INT8 quant-aware | FP16 and INT8 Students |
 | 5. Profile and audit | Measure speed, memory, cost, AUROC, and calibration per subgroup | Comparison of all models |
@@ -72,6 +72,10 @@ The terms in this table mean the following.
 
 - **Fine-tuning:** Continuing to train a pretrained model on a new task.
 - **Mixed precision:** Training with a mix of 16-bit and 32-bit numbers to run faster.
+- **Dropout:** Switching off a random share of values during training, so the model relies less on
+  any single one.
+- **Weight averaging:** Combining several trained copies of a model into one by averaging their
+  numbers.
 - **Distillation:** Training a small model to copy the outputs of a large one.
 - **Quantization:** Storing a model's numbers with fewer bits, which makes it smaller.
 - **Post-training INT8:** Converting to 8 bits after training is finished.
@@ -79,13 +83,31 @@ The terms in this table mean the following.
 
 ### Baselines
 
-A result only means something next to a simpler option, so we compare against two.
+A result only means something next to a simpler option, so we compare against three.
 
 - **EchoNext-Mini:** The released weights, 1.05M parameters.
 - **Gradient boosting:** A standard non-neural model that uses only the 7 extra numbers.
+- **Logistic regression:** A linear model on 45 inputs: the 7 extra numbers, 2 flags that mark a
+  filled-in PR interval or atrial rate, and 3 voltage summaries for each of the 12 leads.
 
 **The Teacher must beat EchoNext-Mini.** If it does not, then a Student that copies it has
 little value, however fast it runs.
+
+On the 4,626 Validation ECGs it does. The Teacher scores 85.15 SHD AUROC and EchoNext-Mini scores
+81.48, a lead of 3.67 points. Redrawing the patients 2,000 times, with the same patients for both
+models, puts the lead between 2.87 and 4.45 points 95% of the time. The numbers are in
+[`results/teacher/val_gap_teacher_vs_mini.json`](results/teacher/val_gap_teacher_vs_mini.json),
+and `scripts/compare_runs.py` makes them from any two saved runs.
+
+Two limits apply. The Teacher's settings were tuned on Validation and EchoNext-Mini's were not, so
+the lead runs slightly high. The Test ECGs give the clean comparison, and they are scored once,
+at the end.
+
+Logistic regression scores 77.29 on the same Validation ECGs, 4.18 points below EchoNext-Mini,
+with the gap between 3.19 and 5.17 points 95% of the time
+([`results/baselines/val_gap_logistic_vs_mini.json`](results/baselines/val_gap_logistic_vs_mini.json)).
+Its regularization strength was also picked on Validation. `scripts/run_linear.py` fits it on a
+CPU in under a minute.
 
 ### Profiling tools
 
@@ -156,12 +178,13 @@ with a note on what to do, and their docstrings give the exact inputs and output
 | Role | Code | Command | Passes on |
 |---|---|---|---|
 | A: Data and baselines | `data.py`, `baseline.py`, `profiling.py` | `run_baseline.py`, `run_profile.py` | Baseline runs, fitted tabular checkpoint, profiling table |
-| B: Teacher | `teacher.py` | `run_teacher.py` | Teacher checkpoint and runs |
+| B: Teacher | `teacher.py`, `sweep.py`, `runs.py` | `run_teacher.py`, `sweep_teacher.py`, `soup_teacher.py` | Teacher checkpoint and runs |
 | C: Student | `distill.py` | `run_student.py` | Student checkpoint and runs |
 | D: Quantization | `quantize.py` | `run_quantize.py` | FP16 and INT8 models and runs |
 | E: Audit | `audit.py` | `run_audit.py` | Aggregate tables and figures |
 
-Files are in `src/compress_ecg/`, and commands are in `scripts/`. Three files are shared and
+Files are in `src/compress_ecg/`, and commands are in `scripts/`. The
+[Teacher guide](docs/teacher.md) lists the Teacher's other commands. Three files are shared and
 already work, so change them only after telling the team.
 
 - **`data.py`:** Loads the ECGs. Each batch has `waveform`, `tabular`, `labels`, and `label_mask`.
@@ -323,7 +346,7 @@ pytest -q tests/test_teacher.py
 | `runs/` | Private predictions and run metadata, ignored by Git |
 | `checkpoints/` | Private fitted models and downloaded weights, ignored by Git |
 | `tests/` | Unit tests |
-| `docs/` | Proposal and reports |
+| `docs/` | Proposal, guides, and reports |
 
 ## External resources
 

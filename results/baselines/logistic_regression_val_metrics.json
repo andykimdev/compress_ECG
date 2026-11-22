@@ -1,0 +1,154 @@
+{
+  "model": "logistic_regression",
+  "split": "val",
+  "n_records": 4626,
+  "code": {
+    "commit": null,
+    "dirty": null
+  },
+  "data_version": "1.1.1",
+  "n_inputs": 45,
+  "inputs": [
+    "sex",
+    "age_at_ecg",
+    "ventricular_rate",
+    "atrial_rate",
+    "pr_interval",
+    "qrs_duration",
+    "qt_corrected",
+    "atrial_rate_filled",
+    "pr_interval_filled",
+    "lead0_std",
+    "lead1_std",
+    "lead2_std",
+    "lead3_std",
+    "lead4_std",
+    "lead5_std",
+    "lead6_std",
+    "lead7_std",
+    "lead8_std",
+    "lead9_std",
+    "lead10_std",
+    "lead11_std",
+    "lead0_p95",
+    "lead1_p95",
+    "lead2_p95",
+    "lead3_p95",
+    "lead4_p95",
+    "lead5_p95",
+    "lead6_p95",
+    "lead7_p95",
+    "lead8_p95",
+    "lead9_p95",
+    "lead10_p95",
+    "lead11_p95",
+    "lead0_p5",
+    "lead1_p5",
+    "lead2_p5",
+    "lead3_p5",
+    "lead4_p5",
+    "lead5_p5",
+    "lead6_p5",
+    "lead7_p5",
+    "lead8_p5",
+    "lead9_p5",
+    "lead10_p5",
+    "lead11_p5"
+  ],
+  "fitted_on": "train",
+  "c": 0.001,
+  "val_shd_auroc_by_c": {
+    "1e-05": 0.7578263090871658,
+    "0.0001": 0.7705235204855841,
+    "0.001": 0.7729377158935802,
+    "0.01": 0.7715655287057441,
+    "0.1": 0.7697680359307921
+  },
+  "fill_values": {
+    "atrial_rate": -2.0080222217713515,
+    "pr_interval": -2.4745133190479156
+  },
+  "seconds": {
+    "lead_summaries": 42.2,
+    "fit_all_c": 4.8
+  },
+  "flagged_training_ecgs": {
+    "atrial_rate": 508,
+    "pr_interval": 7619
+  },
+  "mean_auroc": 0.7537229448406859,
+  "metrics": {
+    "lvef_lte_45_flag": {
+      "n_observed": 4626,
+      "n_positive": 866,
+      "auroc": 0.8125307110215714,
+      "brier": 0.11547852434679912
+    },
+    "lvwt_gte_13_flag": {
+      "n_observed": 4626,
+      "n_positive": 877,
+      "auroc": 0.7109204035557335,
+      "brier": 0.14380624220742771
+    },
+    "aortic_stenosis_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 252,
+      "auroc": 0.857597382803144,
+      "brier": 0.045563707289525704
+    },
+    "aortic_regurgitation_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 62,
+      "auroc": 0.7554087387973197,
+      "brier": 0.013039348387751743
+    },
+    "mitral_regurgitation_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 282,
+      "auroc": 0.7952748063686116,
+      "brier": 0.05284355905947619
+    },
+    "tricuspid_regurgitation_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 305,
+      "auroc": 0.794572446420645,
+      "brier": 0.05646757024662692
+    },
+    "pulmonary_regurgitation_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 21,
+      "auroc": 0.5810764696758182,
+      "brier": 0.004555491542714207
+    },
+    "rv_systolic_dysfunction_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 368,
+      "auroc": 0.8042910276308535,
+      "brier": 0.0653945510264962
+    },
+    "pericardial_effusion_moderate_large_flag": {
+      "n_observed": 4626,
+      "n_positive": 52,
+      "auroc": 0.7083515522518583,
+      "brier": 0.011326558478796636
+    },
+    "pasp_gte_45_flag": {
+      "n_observed": 4626,
+      "n_positive": 581,
+      "auroc": 0.7206389392994901,
+      "brier": 0.10581984428119764
+    },
+    "tr_max_gte_32_flag": {
+      "n_observed": 4626,
+      "n_positive": 267,
+      "auroc": 0.7310751443696069,
+      "brier": 0.054619250839642114
+    },
+    "shd_moderate_or_greater_flag": {
+      "n_observed": 4626,
+      "n_positive": 1990,
+      "auroc": 0.7729377158935802,
+      "brier": 0.19560667153999078
+    }
+  }
+}

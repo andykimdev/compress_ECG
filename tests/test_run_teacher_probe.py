@@ -82,9 +82,33 @@ def test_probe_without_a_holdout_writes_the_same_files_and_columns_as_before(run
     assert saved_row_ids(tmp_path / "features" / "val.npz") == [2, 6, 10, 14, 18, 22]
     assert names_in(tmp_path / "probe") == ["raw_lr0.01.pt", "rescaled_lr0.01.pt"]
     table = pd.read_csv(tmp_path / "probe.csv")
-    assert list(table.columns) == ["model", "learning_rate", "best_epoch", "epochs_run", *LABEL_COLUMNS]
+    assert list(table.columns) == ["model", "learning_rate", "seed", "best_epoch", "epochs_run", *LABEL_COLUMNS]
     assert table["model"].tolist() == ["probe_rescaled", "probe_raw"]
+    assert table["seed"].tolist() == [42, 42]
     assert capsys.readouterr().out.count("Validation SHD AUROC") == 2
+
+
+def test_each_seed_gets_its_own_row_and_its_own_output_layer(run_probe, tmp_path):
+    run_probe("--seeds", "42", "43")
+    table = pd.read_csv(tmp_path / "probe.csv")
+    assert table[["model", "seed"]].values.tolist() == [
+        ["probe_rescaled", 42], ["probe_rescaled", 43], ["probe_raw", 42], ["probe_raw", 43],
+    ]
+    # Seed 42 keeps the plain name, because fine-tuning starts from that file.
+    assert names_in(tmp_path / "probe") == [
+        "raw_lr0.01.pt", "raw_lr0.01_s43.pt", "rescaled_lr0.01.pt", "rescaled_lr0.01_s43.pt",
+    ]
+
+
+def test_a_seed_changes_the_fitted_layer_and_the_default_seed_is_42(run_probe, tmp_path):
+    run_probe("--seeds", "42", "43")
+    seed_42 = torch.load(tmp_path / "probe" / "rescaled_lr0.01.pt", weights_only=True)
+    seed_43 = torch.load(tmp_path / "probe" / "rescaled_lr0.01_s43.pt", weights_only=True)
+    assert any(not torch.equal(seed_42[name], seed_43[name]) for name in seed_42)
+
+    run_probe("--heads-dir", str(tmp_path / "default"))
+    default = torch.load(tmp_path / "default" / "rescaled_lr0.01.pt", weights_only=True)
+    assert all(torch.equal(seed_42[name], default[name]) for name in seed_42)
 
 
 def test_another_holdout_seed_gets_its_own_patients_and_files(run_probe, tmp_path):

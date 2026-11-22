@@ -1,0 +1,13 @@
+output,n_observed,n_positive,auroc,brier
+lvef_lte_45_flag,4626,866,0.9172,0.0759
+lvwt_gte_13_flag,4626,877,0.7805,0.1314
+aortic_stenosis_moderate_or_greater_flag,4626,252,0.8805,0.0421
+aortic_regurgitation_moderate_or_greater_flag,4626,62,0.7853,0.013
+mitral_regurgitation_moderate_or_greater_flag,4626,282,0.8621,0.048
+tricuspid_regurgitation_moderate_or_greater_flag,4626,305,0.8753,0.0494
+pulmonary_regurgitation_moderate_or_greater_flag,4626,21,0.7394,0.0045
+rv_systolic_dysfunction_moderate_or_greater_flag,4626,368,0.902,0.05
+pericardial_effusion_moderate_large_flag,4626,52,0.7715,0.0113
+pasp_gte_45_flag,4626,581,0.8255,0.088
+tr_max_gte_32_flag,4626,267,0.8437,0.0478
+shd_moderate_or_greater_flag,4626,1990,0.8515,0.1544

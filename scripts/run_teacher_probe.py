@@ -15,6 +15,7 @@ Special Notes:
 """
 
 import argparse
+import itertools
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +28,8 @@ from compress_ecg.predictions import basic_metrics, predict
 from compress_ecg.teacher import build_teacher, extract_features, fit_probe
 
 VARIANTS = {"rescaled": True, "raw": False}
+# Fine-tuning starts from the layer of this seed, so its file keeps the name without a seed.
+DEFAULT_SEED = 42
 
 
 def load_or_extract(teacher, dataset, path: Path, args) -> dict[str, np.ndarray]:
@@ -78,6 +81,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--patient-seed", type=int, default=0, help="Seed of the draw of kept patients")
     parser.add_argument("--limit", type=int, help="Use only this many ECGs per split, for a quick check")
     parser.add_argument("--learning-rates", type=float, nargs="+", default=[1e-4, 1e-3, 1e-2])
+    parser.add_argument("--seeds", type=int, nargs="+", default=[DEFAULT_SEED],
+                        help="Fit every layer once per seed. Layers of other seeds than 42 get the seed in their name")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--device", default="cpu", help="cpu, cuda or mps")
     parser.add_argument("--with-mini", action="store_true", help="Also score EchoNext-Mini on the same ECGs")
@@ -118,18 +123,20 @@ def main(argv: list[str] | None = None) -> None:
 
     rows = []
     for variant, rescale in VARIANTS.items():
-        for lr in args.learning_rates:
-            head, history = fit_probe(features[fitted_on], features[picked_on], rescale=rescale, lr=lr)
-            path = heads_dir / f"{variant}_lr{lr:g}{suffix}.pt"
+        for lr, seed in itertools.product(args.learning_rates, args.seeds):
+            head, history = fit_probe(features[fitted_on], features[picked_on], rescale=rescale, lr=lr, seed=seed)
+            seed_tag = "" if seed == DEFAULT_SEED else f"_s{seed}"
+            path = heads_dir / f"{variant}_lr{lr:g}{seed_tag}{suffix}.pt"
             path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(head.state_dict(), path)
             metrics = head_metrics(head, features[picked_on])
             rows.append({
-                "model": f"probe_{variant}", "learning_rate": lr, "best_epoch": int(np.argmax(history)) + 1,
-                "epochs_run": len(history), **{name: metrics[name]["auroc"] for name in LABEL_COLUMNS},
+                "model": f"probe_{variant}", "learning_rate": lr, "seed": seed,
+                "best_epoch": int(np.argmax(history)) + 1, "epochs_run": len(history),
+                **{name: metrics[name]["auroc"] for name in LABEL_COLUMNS},
             })
             best_epoch = rows[-1]["best_epoch"]
-            print(f"{variant:9s} lr {lr:g}: {picked_name} SHD AUROC {max(history):.4f} at epoch {best_epoch}")
+            print(f"{variant:9s} lr {lr:g} seed {seed}: {picked_name} SHD AUROC {max(history):.4f} at epoch {best_epoch}")
 
     if args.with_mini:
         metrics = basic_metrics(predict(load_mini(device=args.device), datasets[picked_on], device=args.device))
@@ -143,7 +150,7 @@ def main(argv: list[str] | None = None) -> None:
     if not args.limit:
         results.parent.mkdir(parents=True, exist_ok=True)
         table.to_csv(results, index=False)
-    print(table[["model", "learning_rate", "best_epoch", LABEL_COLUMNS[SHD_INDEX]]].to_string(index=False))
+    print(table[["model", "learning_rate", "seed", "best_epoch", LABEL_COLUMNS[SHD_INDEX]]].to_string(index=False))
 
 
 if __name__ == "__main__":
