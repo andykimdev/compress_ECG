@@ -45,16 +45,17 @@ Only the Teacher and the Student are trained by us.
 | Name | What it is | Parameters | AUROC | Our role |
 |---|---|---|---|---|
 | EchoNext | Full FDA-cleared Columbia model | Not released | 85.2 | Context only |
-| EchoNext-Mini | Released small version, ResNet design | 1.05M | 82.0 | Baseline to compare against |
+| EchoNext-Mini | Released small version, ResNet design | 1.05M | 82.0 published, 81.97 in our run | Baseline to compare against |
 | ECG-FM | Pretrained ECG foundation model | 90.9M | None yet | Starting point for the Teacher |
 | Teacher | ECG-FM plus a new output layer | 90.4M | 85.15 on Validation | Fine-tune it, and it must beat 82.0 |
 | Student | EchoNext-Mini design, made narrower | 0.10M | To measure | Train it by distillation |
 | Student FP16 and INT8 | Student stored in 16 or 8 bits | 0.10M | To measure | Quantize and deploy it |
 
-AUROC is explained under [How we judge a model](#how-we-judge-a-model). The EchoNext and
-EchoNext-Mini scores are the published ones. We have not reproduced them yet. The Teacher score is
-ours, on the Validation ECGs, and the [Teacher guide](docs/teacher.md) explains how to get and use
-the model.
+AUROC is explained under [How we judge a model](#how-we-judge-a-model). The EchoNext score is the
+published one. For EchoNext-Mini, our run of the released weights on the Test ECGs gives 81.97,
+next to the published 82.0, which also checks our data loading and scoring code. The Teacher
+score is ours, on the Validation ECGs, and the [Teacher guide](docs/teacher.md) explains how to
+get and use the model.
 
 ## The experiment pipeline
 
@@ -89,6 +90,17 @@ A result only means something next to a simpler option, so we compare against th
 - **Gradient boosting:** A standard non-neural model that uses only the 7 extra numbers.
 - **Logistic regression:** A linear model on 45 inputs: the 7 extra numbers, 2 flags that mark a
   filled-in PR interval or atrial rate, and 3 voltage summaries for each of the 12 leads.
+
+The table gives SHD AUROC for each model so far. The files in
+[`results/baselines`](results/baselines) and [`results/teacher`](results/teacher) hold the scores
+for all 12 outputs.
+
+| Model | Validation | Test |
+|---|---|---|
+| Teacher | 85.15 | Not scored yet |
+| EchoNext-Mini | 81.48 | 81.97 |
+| Logistic regression | 77.29 | Not scored yet |
+| Gradient boosting | 74.43 | 76.15 |
 
 **The Teacher must beat EchoNext-Mini.** If it does not, then a Student that copies it has
 little value, however fast it runs.
@@ -229,11 +241,14 @@ your role's stand-in in that test with the real call.
 - **Done:** We downloaded the data, checked its hashes, and
   [summarized it](results/data_stats). The summary checks found no cleaning step we need.
 - **Done:** The shared code framework is in place, with one file for each role to fill in.
-- **Done on the Role A branch:** Mini inference, tabular gradient boosting, and synthetic-input
-  profiling are implemented. The baseline notebook runs both models against the same splits.
-- **Next:** Run both baselines on the real dataset and compare Mini's Test SHD AUROC with 82.0.
+- **Done:** Mini inference, tabular gradient boosting, and synthetic-input profiling are
+  implemented. The baseline notebook runs both models against the same splits.
+- **Done:** Both baselines ran on the real dataset. EchoNext-Mini scores 81.97 SHD AUROC on Test,
+  next to the published 82.0, and gradient boosting scores 76.15.
+- **Done:** A logistic regression baseline scores 77.29 SHD AUROC on Validation.
 - **Done:** The Teacher is fine-tuned and scores 85.15 SHD AUROC on Validation. The
   [Teacher guide](docs/teacher.md) covers how to download it and make its predictions.
+- **Next:** Train the Student from the Teacher's predictions on the Training ECGs.
 - **Not decided yet:** The one deployment device for steps 4 and 5.
 
 ## The data
