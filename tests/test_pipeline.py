@@ -5,7 +5,6 @@ When a role's real code exists, replace its stand-in here with the real call.
 
 import copy
 
-import numpy as np
 import pytest
 import torch
 from torch import nn
@@ -13,6 +12,7 @@ from torch.utils.data import DataLoader
 
 from compress_ecg.baseline import run_gradient_boosting
 from compress_ecg.data import EchoNextDataset, LABEL_COLUMNS, SHD_INDEX
+from compress_ecg.distill import train_student
 from compress_ecg.predictions import aligned_logits, basic_metrics, load_run, run_dir, write_run
 
 
@@ -25,20 +25,6 @@ class TinyModel(nn.Module):
 
     def forward(self, waveform, tabular):
         return self.layer(tabular) + waveform.mean(dim=(1, 2), keepdim=False).unsqueeze(1)
-
-
-def stand_in_distillation(student, teacher_run, train):
-    """Take a few gradient steps toward saved Teacher logits, using shuffled batches."""
-    optimizer = torch.optim.SGD(student.parameters(), lr=.01)
-    losses = []
-    for batch in DataLoader(train, batch_size=2, shuffle=True, generator=torch.Generator().manual_seed(0)):
-        targets = aligned_logits(teacher_run, batch["row_id"])
-        loss = nn.functional.mse_loss(student(batch["waveform"], batch["tabular"]), targets)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        losses.append(loss.item())
-    return losses
 
 
 def test_handoffs_connect_from_teacher_to_scorecard(data_dir, tmp_path):
@@ -61,8 +47,10 @@ def test_handoffs_connect_from_teacher_to_scorecard(data_dir, tmp_path):
     student = TinyModel()
     before = student.layer.weight.detach().clone()
     teacher_run = load_run(run_dir("teacher", "train", tmp_path))
-    losses = stand_in_distillation(student, teacher_run, train)
-    assert np.isfinite(losses).all()
+    checkpoint = train_student(
+        student, teacher_run, train, val, tmp_path / "checkpoints" / "student", batch_size=2, max_epochs=1,
+    )
+    assert checkpoint.is_file()
     assert not torch.equal(before, student.layer.weight)
     for dataset in (val, test):
         write_run(student, "student", dataset, runs_root=tmp_path)
