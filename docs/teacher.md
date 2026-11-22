@@ -99,29 +99,53 @@ model is in evaluation mode with its weights frozen.
 
 ## How the Teacher was built
 
-Each step below added to the one before it. Scores are the average SHD AUROC on Validation over
-the seeds in that row, taken from the [run table](../results/teacher/runs.csv).
+Each step below added to the one before it. Every row uses seeds 42 to 47. Scores are the average
+SHD AUROC on Validation over those seeds, and the spread is their standard deviation. Step 0
+comes from the [probe table](../results/teacher/probe.csv) and the rest from the
+[run table](../results/teacher/runs.csv).
 
-| Step | Change | Seeds | SHD AUROC |
-|---|---|---|---|
-| 1 | Fine-tune ECG-FM with learning rates 1e-5 and 1e-4 | 2 | 83.41 |
-| 2 | Add dropout of 0.5 before the output layer | 3 | 84.57 |
-| 3 | Add the 7 tabular numbers as inputs | 3 | 84.68 |
-| 4 | Average the weights during training, score 4 times per epoch, and pick by SHD | 6 | 85.07 |
-| 5 | Average the weights of the 6 runs from step 4 into one model | 1 model | 85.15 |
+| Step | Change | Seeds | SHD AUROC | Spread |
+|---|---|---|---|---|
+| 0 | Keep ECG-FM fixed and train only a new output layer | 6 | 82.22 | 0.05 |
+| 1 | Fine-tune ECG-FM with learning rates 1e-5 and 1e-4 | 6 | 83.26 | 0.49 |
+| 2 | Add dropout of 0.5 before the output layer | 6 | 84.51 | 0.22 |
+| 3 | Add the 7 tabular numbers as inputs | 6 | 84.68 | 0.21 |
+| 4 | Average the weights during training, score 4 times per epoch, and pick by SHD | 6 | 85.07 | 0.08 |
+| 5 | Average the weights of the 6 runs from step 4 into one model | 1 model | 85.15 | None |
 
-The runs in steps 2 and 3 used two GPU models, so small gaps between those rows are less certain
-than the table suggests. Lead masking and patient balancing were also tried and added nothing on
-top of dropout. Averaging 12 runs in step 5 scored 85.16, a tie with averaging 6.
+Read the small steps with care.
+
+- **Step 3:** The gain of 0.17 points is smaller than the spread of either row, so it is not
+  distinguishable from noise.
+- **Step 5:** A second model averaged from seeds 48 to 53 scored 85.17, recorded in
+  [`soup_check_s48to53.json`](../results/teacher/soup_check_s48to53.json). Both averaged models
+  sit about 0.08 points above the average of their own 6 runs. Averaging 12 runs scored 85.16.
+- **GPU models:** Three of the runs in steps 2 and 3 ran on an A100 and the rest on an RTX PRO
+  6000, so small gaps between those rows are less certain than the table suggests.
+- **Step 0 setting:** The row is the rescaled output layer at learning rate 0.001. The probe table
+  holds 6 settings times 6 seeds and comes from
+  `python scripts/run_teacher_probe.py --seeds 42 43 44 45 46 47 --with-mini`.
+
+Lead masking and patient balancing were also tried and added nothing on top of dropout.
+
+### Scores, speed, and memory
+
+- **Each output:** [`best_teacher_val.csv`](../results/teacher/best_teacher_val.csv) lists AUROC
+  and Brier score for all 12 outputs of the current Teacher on Validation.
+- **Speed and memory:** [`best_teacher_speed.json`](../results/teacher/best_teacher_speed.json)
+  holds the forward pass time and peak GPU memory on one RTX PRO 6000. At batch size 64 in
+  32-bit precision, the Teacher takes 1.18 ms per ECG, which is 844 ECGs per second, with a peak
+  of 1.91 GB. `scripts/time_teacher.py` makes the file. Disk reading is not timed.
 
 ### Rebuild it
 
 All commands run from the repository root, in the Teacher environment.
 
-1. Fit the starting output layer on frozen ECG-FM features.
+1. Fit the starting output layer on frozen ECG-FM features. Fine-tuning starts from the seed 42
+   layer, and the other seeds fill the probe table.
 
 ```bash
-python scripts/run_teacher_probe.py --device cuda
+python scripts/run_teacher_probe.py --device cuda --seeds 42 43 44 45 46 47 --with-mini
 ```
 
 2. Fine-tune 6 seeds with the settings in `configs/teacher_ema.json`.
