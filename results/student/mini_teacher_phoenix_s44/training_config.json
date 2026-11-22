@@ -1,0 +1,70 @@
+{
+  "seed": 44,
+  "device": "cuda",
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0001,
+  "max_epochs": 50,
+  "patience": 7,
+  "min_delta": 0.001,
+  "temperature": 2.0,
+  "hard_label_weight": 0.5,
+  "num_workers": 0,
+  "train_records": 72475,
+  "val_records": 4626,
+  "train_seed": 42,
+  "val_seed": 42,
+  "teacher_manifest": {
+    "model": "mini",
+    "code": {
+      "commit": "50c1cc594c70390d08995554d62a92c2206d0c34",
+      "dirty": false
+    },
+    "data_version": "1.1.1",
+    "data_dir": "/DATA/process_KK/cnn_profiling_2/compress_ECG/data/echonext/1.1.1",
+    "metadata_sha256": "a1fb9f1a4d5fa2ea7238fe70247a2b8ad8a13d7b3ed9ee3685dd40871fac3c1f",
+    "split": "train",
+    "n_records": 72475,
+    "label_columns": [
+      "lvef_lte_45_flag",
+      "lvwt_gte_13_flag",
+      "aortic_stenosis_moderate_or_greater_flag",
+      "aortic_regurgitation_moderate_or_greater_flag",
+      "mitral_regurgitation_moderate_or_greater_flag",
+      "tricuspid_regurgitation_moderate_or_greater_flag",
+      "pulmonary_regurgitation_moderate_or_greater_flag",
+      "rv_systolic_dysfunction_moderate_or_greater_flag",
+      "pericardial_effusion_moderate_large_flag",
+      "pasp_gte_45_flag",
+      "tr_max_gte_32_flag",
+      "shd_moderate_or_greater_flag"
+    ],
+    "sampling_rate_hz": 250,
+    "preprocessing": "official preprocessed arrays; no additional normalization",
+    "waveform_file": {
+      "name": "EchoNext_train_waveforms.npy",
+      "shape": [
+        72475,
+        1,
+        2500,
+        12
+      ],
+      "bytes": 17394000128
+    },
+    "tabular_file": {
+      "name": "EchoNext_train_tabular_features.npy",
+      "shape": [
+        72475,
+        7
+      ],
+      "bytes": 4058728
+    },
+    "versions": {
+      "torch": "2.14.1+cu130",
+      "numpy": "2.2.6"
+    },
+    "batch_size": 256,
+    "num_workers": 0,
+    "device": "cuda"
+  }
+}
