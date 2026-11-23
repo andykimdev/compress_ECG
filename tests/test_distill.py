@@ -9,7 +9,7 @@ from torch import nn
 
 import compress_ecg.distill as distill
 from compress_ecg.data import EchoNextDataset, find_metadata_file
-from compress_ecg.predictions import load_run, write_run
+from compress_ecg.predictions import LogitLookup, load_run, write_run
 
 
 class TinyStudent(nn.Module):
@@ -296,3 +296,31 @@ def test_loader_workers_serve_the_same_batches(training_inputs):
         return [batch["row_id"].tolist() for batch in loader]
 
     assert batch_rows(1) == batch_rows(0)
+
+
+class NanStudent(TinyStudent):
+    def forward(self, waveform, tabular):
+        return super().forward(waveform, tabular) * float("nan")
+
+
+def test_non_finite_loss_raises_before_the_weights_change(training_inputs):
+    train, val, teacher_run = training_inputs
+    student = NanStudent()
+    before = [parameter.detach().clone() for parameter in student.parameters()]
+    loader, _ = distill.make_loaders(train, val, batch_size=2, num_workers=0, seed=0)
+    optimizer = torch.optim.SGD(student.parameters(), lr=1.0)
+
+    with pytest.raises(FloatingPointError, match="weights were not updated"):
+        distill.distillation_step(
+            student, next(iter(loader)), LogitLookup(teacher_run), optimizer,
+            device="cpu", temperature=2.0, hard_label_weight=0.5,
+        )
+
+    assert all(torch.equal(old, new) for old, new in zip(before, student.parameters()))
+
+
+def test_non_finite_loss_in_training_names_the_epoch(training_inputs, tmp_path):
+    train, val, teacher_run = training_inputs
+
+    with pytest.raises(RuntimeError, match="Non-finite training loss at epoch 1"):
+        distill.train_student(NanStudent(), teacher_run, train, val, tmp_path / "student", batch_size=2, max_epochs=1)

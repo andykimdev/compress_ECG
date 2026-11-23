@@ -156,6 +156,9 @@ def distillation_step(
 
     Returns:
         The batch loss, detached, on the device.
+
+    Raises:
+        FloatingPointError: When the loss is not finite. The weights are left unchanged.
     """
     waveform = batch["waveform"].to(device, non_blocking=True)
     tabular = batch["tabular"].to(device, non_blocking=True)
@@ -169,6 +172,9 @@ def distillation_step(
         student_logits, targets, labels, label_mask,
         temperature=temperature, hard_label_weight=hard_label_weight,
     )
+    # Check before stepping, so a bad batch cannot write non-finite values into the weights.
+    if not torch.isfinite(loss).item():
+        raise FloatingPointError("Non-finite training loss, so the weights were not updated")
     loss.backward()
     optimizer.step()
     return loss.detach()
@@ -324,15 +330,13 @@ def train_student(
         total_examples = 0
 
         for batch in train_loader:
-            loss = distillation_step(
-                student, batch, teacher_logits, optimizer, device=device,
-                temperature=temperature, hard_label_weight=hard_label_weight,
-            )
-
-            if not torch.isfinite(loss).item():
-                raise RuntimeError(
-                    f"Non-finite training loss at epoch {epoch + 1}"
+            try:
+                loss = distillation_step(
+                    student, batch, teacher_logits, optimizer, device=device,
+                    temperature=temperature, hard_label_weight=hard_label_weight,
                 )
+            except FloatingPointError as error:
+                raise RuntimeError(f"Non-finite training loss at epoch {epoch + 1}") from error
 
             current_batch_size = batch["waveform"].shape[0]
             total_train_loss += loss.item() * current_batch_size
