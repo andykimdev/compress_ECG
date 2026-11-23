@@ -2,7 +2,9 @@
 
 import pytest
 
-from compress_ecg.evaluation_log import SHD_LABEL, label_scores, paired_gap, seed_spread, speed_scores, wait_range
+from compress_ecg.evaluation_log import (
+    SHD_LABEL, label_scores, paired_gap, paired_seed_gap, seed_number, seed_spread, speed_scores, wait_range,
+)
 
 
 def timing(*rows):
@@ -69,3 +71,27 @@ def test_wait_range_spans_rounds_for_one_worker_count():
 def test_wait_range_fails_when_no_round_used_that_worker_count():
     with pytest.raises(ValueError, match="num_workers=8"):
         wait_range([profile((0, 4.1))], 8)
+
+
+@pytest.mark.parametrize(("folder", "seed"), [
+    ("student_distill_s42", 42), ("mini_teacher_phoenix_s47", 47), ("student_labels_only_s100", 100),
+])
+def test_seed_number_reads_the_folder_suffix(folder, seed):
+    assert seed_number(folder) == seed
+
+
+def test_seed_number_rejects_a_folder_without_a_seed():
+    with pytest.raises(ValueError, match="no seed"):
+        seed_number("student_distill")
+
+
+def test_paired_seed_gap_pairs_by_seed_not_by_order():
+    values = {44: 4.0, 42: 3.0, 43: 5.0}
+    baseline = {42: 1.0, 43: 2.0, 44: 3.0}
+
+    assert paired_seed_gap(values, baseline) == paired_gap([3.0, 5.0, 4.0], [1.0, 2.0, 3.0])
+
+
+def test_paired_seed_gap_rejects_different_seeds():
+    with pytest.raises(ValueError, match=r"\[42, 43\] and \[43, 48\]"):
+        paired_seed_gap({42: 1.0, 43: 2.0}, {43: 1.0, 48: 2.0})

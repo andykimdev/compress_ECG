@@ -13,6 +13,7 @@ Special Notes:
 from __future__ import annotations
 
 import math
+import re
 import statistics
 
 from scipy import stats
@@ -90,6 +91,36 @@ def paired_gap(values: list[float], baseline: list[float], confidence: float = 0
             "seeds_ahead": sum(gap > 0 for gap in gaps), "n_seeds": len(gaps)}
 
 
+def seed_number(folder: str) -> int:
+    """
+    Return the seed of a folder named <prefix>_s<seed>, such as 42 for student_distill_s42.
+
+    Raises:
+        ValueError: When the name does not end in _s and a number.
+    """
+    match = re.fullmatch(r".+_s(\d+)", folder)
+    if match is None:
+        raise ValueError(f"Folder {folder} has no seed, so it must end in _s<seed>")
+    return int(match.group(1))
+
+
+def paired_seed_gap(values: dict[int, float], baseline: dict[int, float]) -> dict:
+    """
+    Return paired_gap for two arms, matched by seed number instead of list position.
+
+    Args:
+        values: Seed to score for the arm of interest.
+        baseline: Seed to score for the compared arm.
+
+    Raises:
+        ValueError: When the two arms do not hold the same seeds.
+    """
+    if values.keys() != baseline.keys():
+        raise ValueError(f"Paired gaps need the same seeds, got {sorted(values)} and {sorted(baseline)}")
+    seeds = sorted(values)
+    return paired_gap([values[seed] for seed in seeds], [baseline[seed] for seed in seeds])
+
+
 def speed_scores(timing: dict, *, rows: tuple[tuple[str, int], ...]) -> dict:
     """
     Return ms per ECG and peak GPU memory for chosen precisions and batch sizes.
@@ -150,8 +181,10 @@ def build_runs(results: dict) -> list[dict]:
         Run specs with name, group, job_type, config, and summary.
     """
     arms = {arm: [seed for _, seed in sorted(results["students"][arm].items())] for arm in STUDENT_ARMS}
-    distill_shd = [label_scores(seed)["shd_auroc"] for seed in arms["distill"]]
-    labels_shd = [label_scores(seed)["shd_auroc"] for seed in arms["labels_only"]]
+    distill_shd, labels_shd = (
+        {seed_number(folder): label_scores(metrics)["shd_auroc"] for folder, metrics in results["students"][arm].items()}
+        for arm in ("distill", "labels_only")
+    )
     fp16 = results["fp16"]
     teacher_speed = results["teacher_speed"]
     student_speed = results["student_speed"]
@@ -175,7 +208,7 @@ def build_runs(results: dict) -> list[dict]:
             "gpu": teacher_speed["gpu"], "warmup": teacher_speed["warmup"], "repeats": teacher_speed["repeats"]}),
         run_spec("eval_student_distill", {
             **arm_scores(arms["distill"]),
-            **prefixed("val_shd_auroc", {key: value for key, value in paired_gap(distill_shd, labels_shd).items()
+            **prefixed("val_shd_auroc", {key: value for key, value in paired_seed_gap(distill_shd, labels_shd).items()
                                          if key != "n_seeds"}),
             "fp16_val_shd_auroc_mean": statistics.fmean(row["shd16"] for row in fp16["rows"]),
             "fp16_max_shd_auroc_change": max(abs(row["shd16"] - row["shd32"]) for row in fp16["rows"]),
