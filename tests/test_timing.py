@@ -150,3 +150,23 @@ def test_command_refuses_a_batch_larger_than_the_split(load_script, monkeypatch,
     # The small dataset has 6 Validation ECGs.
     with pytest.raises(SystemExit, match="6 ECGs"):
         run_command(load_script, monkeypatch, data_dir, tmp_path, "--batch-sizes", "7")
+
+
+def test_step_summary_splits_waiting_from_computing():
+    from compress_ecg.timing import step_summary
+
+    summary = step_summary([0.010, 0.030, 0.020], [0.040, 0.020, 0.030], batch_size=32)
+
+    # Total time is 0.06 waiting plus 0.09 computing, so 0.15 s for 96 ECGs.
+    assert summary == pytest.approx({
+        "batch_size": 32, "steps": 3, "median_wait_ms": 20.0, "median_compute_ms": 30.0,
+        "wait_share": 0.4, "ecgs_per_second": 640.0,
+    })
+
+
+@pytest.mark.parametrize("wait, compute", [([], []), ([0.1], [0.1, 0.2])])
+def test_step_summary_needs_one_timing_per_step(wait, compute):
+    from compress_ecg.timing import step_summary
+
+    with pytest.raises(ValueError):
+        step_summary(wait, compute, batch_size=32)

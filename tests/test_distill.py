@@ -231,3 +231,68 @@ def test_loss_rejects_broadcasting_teacher_targets():
         distill.distillation_loss(
             logits, logits[:1], logits, logits.bool(), temperature=2, hard_label_weight=0.5,
         )
+
+
+def test_mean_auroc_averages_outputs_over_observed_labels():
+    labels = torch.tensor([[1., 0.], [0., 1.], [1., 1.], [0., 0.]])
+    probabilities = torch.tensor([[0.9, 0.2], [0.1, 0.6], [0.8, 0.4], [0.2, 0.9]])
+    mask = torch.ones_like(labels, dtype=torch.bool)
+
+    # Column 0 ranks perfectly (1.0). Column 1 wins 2 of 4 pairs (0.5).
+    assert distill.mean_auroc(labels, mask, probabilities) == pytest.approx(0.75)
+
+
+def test_mean_auroc_leaves_out_masked_labels():
+    labels = torch.tensor([[1., 0.], [0., 1.], [1., 1.], [0., 0.]])
+    probabilities = torch.tensor([[0.9, 0.2], [0.1, 0.6], [0.8, 0.4], [0.2, 0.9]])
+    mask = torch.ones_like(labels, dtype=torch.bool)
+    mask[3, 1] = False
+
+    # Without row 3, column 1 has negative 0.2 against positives 0.6 and 0.4, so 1.0.
+    assert distill.mean_auroc(labels, mask, probabilities) == pytest.approx(1.0)
+
+
+def test_mean_auroc_skips_outputs_with_one_class():
+    labels = torch.tensor([[1., 1.], [0., 1.]])
+    probabilities = torch.tensor([[0.9, 0.3], [0.1, 0.7]])
+    mask = torch.ones_like(labels, dtype=torch.bool)
+
+    assert distill.mean_auroc(labels, mask, probabilities) == pytest.approx(1.0)
+
+
+def test_history_records_speed_and_mean_score(training_inputs, tmp_path):
+    train, val, teacher_run = training_inputs
+    output = tmp_path / "student"
+
+    distill.train_student(TinyStudent(), teacher_run, train, val, output, batch_size=2, max_epochs=1)
+
+    record = json.loads((output / "history.json").read_text())[0]
+    assert set(record) == {
+        "epoch", "train_loss", "val_loss", "val_shd_auc", "best_val_shd_auc", "val_mean_auroc",
+        "epoch_seconds", "train_seconds", "val_seconds", "train_ecgs_per_second", "peak_gpu_memory_bytes",
+    }
+    assert record["train_seconds"] > 0 and record["train_ecgs_per_second"] > 0
+    assert record["peak_gpu_memory_bytes"] is None
+
+
+def test_each_epoch_record_reaches_the_callback(training_inputs, tmp_path):
+    train, val, teacher_run = training_inputs
+    output = tmp_path / "student"
+    received = []
+
+    distill.train_student(
+        TinyStudent(), teacher_run, train, val, output, batch_size=2, max_epochs=2, patience=2,
+        on_epoch=received.append,
+    )
+
+    assert received == json.loads((output / "history.json").read_text())
+
+
+def test_loader_workers_serve_the_same_batches(training_inputs):
+    train, val, _ = training_inputs
+
+    def batch_rows(workers):
+        loader, _ = distill.make_loaders(train, val, batch_size=2, num_workers=workers, seed=7)
+        return [batch["row_id"].tolist() for batch in loader]
+
+    assert batch_rows(1) == batch_rows(0)

@@ -96,3 +96,32 @@ def timing_summary(seconds: Sequence[float], batch_size: int) -> dict:
         "ms_per_ecg": median * 1000 / batch_size, "ms_per_ecg_p5": low * 1000 / batch_size,
         "ms_per_ecg_p95": high * 1000 / batch_size, "ecgs_per_second": batch_size / median,
     }
+
+
+def step_summary(wait_seconds: Sequence[float], compute_seconds: Sequence[float], batch_size: int) -> dict:
+    """
+    Summarize training steps split into waiting for data and computing.
+
+    Args:
+        wait_seconds: Seconds each step waited for its batch from the loader.
+        compute_seconds: Seconds each step spent on the device work, from copying the
+            batch in to the optimizer update finishing.
+        batch_size: ECGs per step.
+
+    Returns:
+        batch_size, steps, the median wait and compute times in ms, wait_share as the
+        share of all step time spent waiting, and ecgs_per_second over all steps.
+
+    Raises:
+        ValueError: When there are no steps or the two lists differ in length.
+    """
+    if not wait_seconds or len(wait_seconds) != len(compute_seconds):
+        raise ValueError("Give one wait and one compute timing for every step, and at least one step")
+    waited, computed = float(np.sum(wait_seconds)), float(np.sum(compute_seconds))
+    return {
+        "batch_size": batch_size, "steps": len(wait_seconds),
+        "median_wait_ms": float(np.median(wait_seconds)) * 1000,
+        "median_compute_ms": float(np.median(compute_seconds)) * 1000,
+        "wait_share": waited / (waited + computed),
+        "ecgs_per_second": batch_size * len(wait_seconds) / (waited + computed),
+    }

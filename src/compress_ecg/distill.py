@@ -8,16 +8,19 @@ Purpose:
 Special Notes:
 - Owner: Role C.
 - During Phase 1, the Teacher run can be EchoNext-Mini's saved run on the Training ECGs.
-- Inside the training loop, predictions.aligned_logits(run, batch["row_id"]) finds each
-  batch's Teacher logits, including when batches are shuffled.
+- A predictions.LogitLookup, built once per run, finds each batch's Teacher logits by
+  row_id, including when batches are shuffled.
+- Each epoch's record holds its scores and timings, and can go to an experiment tracker.
 """
 
 from __future__ import annotations
 
-import random
-import math
-from pathlib import Path
 import json
+import math
+import random
+import time
+from collections.abc import Callable
+from pathlib import Path
 
 from .student import save_student
 
@@ -31,7 +34,7 @@ from sklearn.metrics import roc_auc_score
 
 from .baseline import EchoNextMini
 from .data import EchoNextDataset, SHD_INDEX, find_metadata_file
-from .predictions import PredictionRun, aligned_logits, sha256_file
+from .predictions import LogitLookup, PredictionRun, sha256_file
 
 
 def distillation_loss(
@@ -82,6 +85,95 @@ def distillation_loss(
     return hard_label_weight * hard_loss + (1 - hard_label_weight) * soft_loss
 
 
+def mean_auroc(labels: torch.Tensor, label_mask: torch.Tensor, probabilities: torch.Tensor) -> float | None:
+    """
+    Average the AUROC of every output over its observed labels.
+
+    Args:
+        labels: True labels [records, outputs].
+        label_mask: False where a label is missing [records, outputs].
+        probabilities: Predicted probabilities [records, outputs].
+
+    Returns:
+        The mean AUROC of the outputs whose observed labels hold both classes, or None
+        when no output does.
+    """
+    scores = []
+    for column in range(labels.shape[1]):
+        observed = label_mask[:, column]
+        targets = labels[observed, column].numpy()
+        if np.unique(targets).size == 2:
+            scores.append(roc_auc_score(targets, probabilities[observed, column].numpy()))
+    return float(np.mean(scores)) if scores else None
+
+
+def make_loaders(
+    train: EchoNextDataset, val: EchoNextDataset, *, batch_size: int, num_workers: int, seed: int,
+) -> tuple[DataLoader, DataLoader]:
+    """
+    Build the shuffled Training loader and the ordered Validation loader.
+
+    Args:
+        train: The Training ECGs.
+        val: The Validation ECGs.
+        batch_size: ECGs per batch.
+        num_workers: Loader worker processes. Zero loads in the main process.
+        seed: Seed of the shuffle order, so a seed repeats the same batches.
+
+    Returns:
+        The Training loader and the Validation loader.
+
+    Notes:
+        The shuffle order is drawn in the main process, so every worker count serves the
+        same batches. Workers stay alive across epochs, and batches go to pinned memory
+        when a GPU is present, so copies to it are faster.
+    """
+    generator = torch.Generator().manual_seed(seed)
+    options = {
+        "batch_size": batch_size, "num_workers": num_workers,
+        "pin_memory": torch.cuda.is_available(), "persistent_workers": num_workers > 0,
+    }
+    train_loader = DataLoader(train, shuffle=True, generator=generator, **options)
+    val_loader = DataLoader(val, shuffle=False, **options)
+    return train_loader, val_loader
+
+
+def distillation_step(
+    student: EchoNextMini, batch: dict, teacher_logits: LogitLookup, optimizer: torch.optim.Optimizer, *,
+    device: str, temperature: float, hard_label_weight: float,
+) -> torch.Tensor:
+    """
+    Take one optimizer step on one Training batch.
+
+    Args:
+        student: The model being trained, in training mode.
+        batch: One batch from the Training loader.
+        teacher_logits: Saved Teacher outputs, looked up by the batch's row_id.
+        optimizer: Updates the student's weights.
+        device: Where the student runs.
+        temperature: Softening used in the distillation loss.
+        hard_label_weight: Share of the loss from observed true labels, from 0 to 1.
+
+    Returns:
+        The batch loss, detached, on the device.
+    """
+    waveform = batch["waveform"].to(device, non_blocking=True)
+    tabular = batch["tabular"].to(device, non_blocking=True)
+    labels = batch["labels"].to(device, non_blocking=True)
+    label_mask = batch["label_mask"].to(device, non_blocking=True)
+    targets = teacher_logits(batch["row_id"]).to(device, non_blocking=True)
+
+    optimizer.zero_grad(set_to_none=True)
+    student_logits = student(waveform, tabular)
+    loss = distillation_loss(
+        student_logits, targets, labels, label_mask,
+        temperature=temperature, hard_label_weight=hard_label_weight,
+    )
+    loss.backward()
+    optimizer.step()
+    return loss.detach()
+
+
 
 def train_student(
     student: EchoNextMini, 
@@ -101,6 +193,7 @@ def train_student(
     temperature: float = 2.0,
     hard_label_weight: float = 0.5,
     num_workers: int = 0,
+    on_epoch: Callable[[dict], None] | None = None,
 ) -> Path:
     """
     Train the Student and save the best checkpoint.
@@ -122,6 +215,8 @@ def train_student(
         temperature: Softening used in the distillation loss.
         hard_label_weight: Share of the loss from observed true labels, from 0 to 1.
         num_workers: DataLoader worker processes; zero loads in the main process.
+        on_epoch: Receives each epoch's record, the same one history.json holds, such as
+            an experiment tracker's log function.
 
     Returns:
         The path of the best checkpoint.
@@ -181,22 +276,11 @@ def train_student(
         raise ValueError("Teacher predictions are missing training ECGs")
 
 
-    generator = torch.Generator().manual_seed(seed)
-
-    train_loader = DataLoader(
-        train,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        generator=generator
+    train_loader, val_loader = make_loaders(
+        train, val, batch_size=batch_size, num_workers=num_workers, seed=seed,
     )
-
-    val_loader = DataLoader(
-        val,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers
-    )
+    on_gpu = str(device).startswith("cuda")
+    teacher_logits = LogitLookup(teacher_run)
 
     optimizer = AdamW(
         student.parameters(),
@@ -232,32 +316,17 @@ def train_student(
     # Training Loop
     for epoch in range(max_epochs):
         student.train()
-        
+        if on_gpu:
+            torch.cuda.reset_peak_memory_stats(device)
+        epoch_start = time.perf_counter()
+
         total_train_loss = 0.0
         total_examples = 0
 
         for batch in train_loader:
-            waveform = batch["waveform"].to(device)
-            tabular = batch["tabular"].to(device)
-            labels = batch["labels"].to(device)
-            label_mask = batch["label_mask"].to(device)
-
-            teacher_logits = aligned_logits(
-                teacher_run,
-                batch["row_id"],
-            ).to(device)
-
-            optimizer.zero_grad(set_to_none=True)
-
-            student_logits = student(waveform, tabular)
-
-            loss = distillation_loss(
-                student_logits,
-                teacher_logits,
-                labels,
-                label_mask,
-                temperature=temperature,
-                hard_label_weight=hard_label_weight,
+            loss = distillation_step(
+                student, batch, teacher_logits, optimizer, device=device,
+                temperature=temperature, hard_label_weight=hard_label_weight,
             )
 
             if not torch.isfinite(loss).item():
@@ -265,21 +334,20 @@ def train_student(
                     f"Non-finite training loss at epoch {epoch + 1}"
                 )
 
-            loss.backward()
-            optimizer.step()
-
-            current_batch_size = waveform.shape[0]
+            current_batch_size = batch["waveform"].shape[0]
             total_train_loss += loss.item() * current_batch_size
             total_examples += current_batch_size
 
         train_loss = total_train_loss / total_examples
-        
+        train_seconds = time.perf_counter() - epoch_start
+
         student.eval()
 
         total_val_loss = 0.0
         total_observed_labels = 0
-        shd_targets = []
-        shd_probabilities = []
+        val_labels = []
+        val_masks = []
+        val_probabilities = []
 
         # Validation computes predictions without tracking gradients.
         with torch.no_grad():
@@ -306,18 +374,19 @@ def train_student(
                 total_val_loss += losses[label_mask].sum().item()
                 total_observed_labels += label_mask.sum().item()
 
-                # SHD labels are guaranteed to be observed by the loader.
-                shd_targets.append(labels[:, SHD_INDEX].cpu())
-                shd_probabilities.append(
-                    torch.sigmoid(logits[:, SHD_INDEX]).cpu()
-                )
+                val_labels.append(labels.cpu())
+                val_masks.append(label_mask.cpu())
+                val_probabilities.append(torch.sigmoid(logits).cpu())
 
         # Average loss across all observed validation targets.
         val_loss = total_val_loss / total_observed_labels
 
         # Compute AUROC once across the entire validation set.
-        y_true = torch.cat(shd_targets).numpy()
-        y_prob = torch.cat(shd_probabilities).numpy()
+        # SHD labels are guaranteed to be observed by the loader.
+        all_labels = torch.cat(val_labels)
+        all_probabilities = torch.cat(val_probabilities)
+        y_true = all_labels[:, SHD_INDEX].numpy()
+        y_prob = all_probabilities[:, SHD_INDEX].numpy()
 
         if np.unique(y_true).size != 2:
             raise ValueError(
@@ -325,6 +394,8 @@ def train_student(
             )
 
         val_auc = float(roc_auc_score(y_true, y_prob))
+        val_mean = mean_auroc(all_labels, torch.cat(val_masks), all_probabilities)
+        epoch_seconds = time.perf_counter() - epoch_start
 
         # Save whenever we achieve a new best validation AUROC.
         if val_auc > best_val_auc:
@@ -339,13 +410,22 @@ def train_student(
             epochs_without_improvement += 1
 
         # Record this epoch's results.
-        history.append({
+        record = {
             "epoch": epoch + 1,
             "train_loss": train_loss,
             "val_loss": val_loss,
             "val_shd_auc": val_auc,
             "best_val_shd_auc": best_val_auc,
-        })
+            "val_mean_auroc": val_mean,
+            "epoch_seconds": epoch_seconds,
+            "train_seconds": train_seconds,
+            "val_seconds": epoch_seconds - train_seconds,
+            "train_ecgs_per_second": total_examples / train_seconds,
+            "peak_gpu_memory_bytes": torch.cuda.max_memory_allocated(device) if on_gpu else None,
+        }
+        history.append(record)
+        if on_epoch is not None:
+            on_epoch(record)
 
         (output_dir / "history.json").write_text(
             json.dumps(history, indent=2, allow_nan=False) + "\n"
