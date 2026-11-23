@@ -1,0 +1,37 @@
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                          training_step        41.07%     126.614ms        60.45%     186.389ms      37.278ms       0.000us         0.00%       4.125ms     825.060us             5  
+                                         wait_for_batch         0.07%     202.350us        14.28%      44.018ms       8.804ms       0.000us         0.00%       0.000us       0.000us             5  
+enumerate(DataLoader)#_SingleProcessDataLoaderIter._...         8.97%      27.658ms        14.21%      43.816ms       8.763ms       0.000us         0.00%       0.000us       0.000us             5  
+autograd::engine::evaluate_function: ConvolutionBack...         0.98%       3.033ms        10.48%      32.299ms     179.439us       0.000us         0.00%       4.388ms      24.380us           180  
+                                   ConvolutionBackward0         0.22%     671.250us         8.92%      27.490ms     152.720us       0.000us         0.00%       4.292ms      23.847us           180  
+                             aten::convolution_backward         4.89%      15.075ms         8.70%      26.818ms     148.991us       4.292ms        41.64%       4.292ms      23.847us           180  
+                                       cudaLaunchKernel         5.93%      18.279ms         5.93%      18.279ms       6.336us       0.000us         0.00%       0.000us       0.000us          2885  
+autograd::engine::evaluate_function: CudnnBatchNormB...         0.98%       3.008ms         5.24%      16.165ms      89.807us       0.000us         0.00%       1.234ms       6.854us           180  
+                              Optimizer.step#AdamW.step         2.37%       7.318ms         5.20%      16.017ms       3.203ms       0.000us         0.00%     289.653us      57.931us             5  
+                                CudnnBatchNormBackward0         0.31%     950.580us         4.27%      13.157ms      73.095us       0.000us         0.00%       1.234ms       6.854us           180  
+                                         aten::randperm         2.03%       6.251ms         4.06%      12.515ms       6.258ms       0.000us         0.00%       0.000us       0.000us             2  
+                        aten::cudnn_batch_norm_backward         1.94%       5.991ms         3.96%      12.207ms      67.814us       1.234ms        11.97%       1.234ms       6.854us           180  
+                                       aten::batch_norm         0.10%     298.260us         3.37%      10.396ms      57.756us       0.000us         0.00%     984.988us       5.472us           180  
+                                           aten::conv1d         0.09%     287.370us         3.31%      10.201ms      56.671us       0.000us         0.00%       1.306ms       7.254us           180  
+                           aten::_batch_norm_impl_index         0.15%     466.850us         3.28%      10.098ms      56.099us       0.000us         0.00%     984.988us       5.472us           180  
+                                      aten::convolution         0.34%       1.061ms         3.22%       9.913ms      55.075us       0.000us         0.00%       1.306ms       7.254us           180  
+                                              aten::cat         3.12%       9.608ms         3.15%       9.724ms     324.124us      10.882us         0.11%      10.882us       0.363us            30  
+                                            aten::stack         0.03%     100.860us         3.13%       9.659ms     482.962us       0.000us         0.00%       0.000us       0.000us            20  
+                                 aten::cudnn_batch_norm         1.51%       4.665ms         3.12%       9.631ms      53.506us     984.988us         9.55%     984.988us       5.472us           180  
+                                            aten::empty         3.03%       9.343ms         3.03%       9.343ms       4.566us       0.000us         0.00%       0.000us       0.000us          2046  
+                                     aten::_convolution         0.41%       1.256ms         2.87%       8.852ms      49.178us       0.000us         0.00%       1.306ms       7.254us           180  
+                                aten::cudnn_convolution         1.50%       4.634ms         2.15%       6.617ms      36.760us       1.306ms        12.66%       1.306ms       7.254us           180  
+                                Activity Buffer Request         2.13%       6.572ms         2.13%       6.572ms       3.286ms       0.000us         0.00%       0.000us       0.000us             2  
+     autograd::engine::evaluate_function: ReluBackward0         0.48%       1.469ms         1.95%       6.009ms      36.420us       0.000us         0.00%     182.046us       1.103us           165  
+                                             aten::add_         1.32%       4.073ms         1.93%       5.936ms       6.595us     392.997us         3.81%     392.997us       0.437us           900  
+autograd::engine::evaluate_function: torch::autograd...         0.90%       2.776ms         1.84%       5.675ms      10.317us       0.000us         0.00%       0.000us       0.000us           550  
+                                               aten::to         0.09%     288.460us         1.68%       5.180ms      14.388us       0.000us         0.00%     648.961us       1.803us           360  
+                                         aten::_to_copy         0.04%     117.180us         1.59%       4.891ms     163.044us       0.000us         0.00%     648.961us      21.632us            30  
+                                              aten::mul         1.39%       4.275ms         1.54%       4.744ms     118.607us      43.296us         0.42%      43.296us       1.082us            40  
+                                            aten::copy_         0.10%     311.100us         1.53%       4.713ms     134.651us     655.809us         6.36%     655.809us      18.737us            35  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 308.312ms
+Self CUDA time total: 10.310ms
+

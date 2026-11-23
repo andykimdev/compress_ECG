@@ -1,0 +1,74 @@
+{
+  "lvef_lte_45_flag": {
+    "n_observed": 4626,
+    "n_positive": 866,
+    "auroc": 0.8792973932484891,
+    "brier": 0.09506254694944373
+  },
+  "lvwt_gte_13_flag": {
+    "n_observed": 4626,
+    "n_positive": 877,
+    "auroc": 0.7466212958955531,
+    "brier": 0.13752611710630627
+  },
+  "aortic_stenosis_moderate_or_greater_flag": {
+    "n_observed": 4626,
+    "n_positive": 252,
+    "auroc": 0.8578604814887393,
+    "brier": 0.04383204668488303
+  },
+  "aortic_regurgitation_moderate_or_greater_flag": {
+    "n_observed": 4626,
+    "n_positive": 62,
+    "auroc": 0.7208694976110372,
+    "brier": 0.013086209585817679
+  },
+  "mitral_regurgitation_moderate_or_greater_flag": {
+    "n_observed": 4626,
+    "n_positive": 282,
+    "auroc": 0.824343596123454,
+    "brier": 0.05437839616798409
+  },
+  "tricuspid_regurgitation_moderate_or_greater_flag": {
+    "n_observed": 4626,
+    "n_positive": 305,
+    "auroc": 0.8511895773974604,
+    "brier": 0.05723241427527591
+  },
+  "pulmonary_regurgitation_moderate_or_greater_flag": {
+    "n_observed": 4626,
+    "n_positive": 21,
+    "auroc": 0.7460731089395584,
+    "brier": 0.004629032571770353
+  },
+  "rv_systolic_dysfunction_moderate_or_greater_flag": {
+    "n_observed": 4626,
+    "n_positive": 368,
+    "auroc": 0.8805534850001021,
+    "brier": 0.060401322528308994
+  },
+  "pericardial_effusion_moderate_large_flag": {
+    "n_observed": 4626,
+    "n_positive": 52,
+    "auroc": 0.7421378359288285,
+    "brier": 0.011504821974711336
+  },
+  "pasp_gte_45_flag": {
+    "n_observed": 4626,
+    "n_positive": 581,
+    "auroc": 0.7698201600326788,
+    "brier": 0.10337435013270553
+  },
+  "tr_max_gte_32_flag": {
+    "n_observed": 4626,
+    "n_positive": 267,
+    "auroc": 0.7881708428813605,
+    "brier": 0.05528721713131025
+  },
+  "shd_moderate_or_greater_flag": {
+    "n_observed": 4626,
+    "n_positive": 1990,
+    "auroc": 0.8244783286691424,
+    "brier": 0.17165174428480556
+  }
+}
