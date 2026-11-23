@@ -128,13 +128,25 @@ class WandbRun:
             project=project, entity=entity, name=name, group=group, mode=mode, tags=tags,
             config=wandb_config(settings), dir=str(directory),
         )
+        self.offline = mode == "offline"
 
     def log_epoch(self, record: dict) -> None:
         """Log one epoch's record at its epoch number."""
         self.run.log(epoch_log(record), step=record["epoch"])
 
     def finish(self, summary: dict) -> None:
-        """Close the run, then store the final scores in its summary."""
+        """
+        Close the run with the final scores in its summary.
+
+        Notes:
+            Online, the scores are written after closing, through the public API, so the
+            last logged epoch cannot replace them. An offline run exists only on disk, where
+            the API cannot reach it, so its scores are set just before closing.
+        """
+        if self.offline:
+            self.run.summary.update(summary)
+            self.run.finish()
+            return
         path = f"{self.run.entity}/{self.run.project}/{self.run.id}"
         self.run.finish()
         write_summary(path, summary)

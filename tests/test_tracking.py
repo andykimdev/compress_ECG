@@ -1,6 +1,9 @@
 """Check what a Student run sends to the experiment tracker, without the network."""
 
-from compress_ecg.tracking import epoch_log, wandb_config
+import sys
+import types
+
+from compress_ecg.tracking import WandbRun, epoch_log, wandb_config
 
 
 def test_wandb_config_keeps_the_teacher_identity_and_drops_the_manifest():
@@ -82,3 +85,40 @@ def test_teacher_summary_names_the_saved_scores_as_best():
         "best_epoch": 2, "epochs_run": 4, "best_val_mean_auroc": 0.8195, "best_val_shd_auroc": 0.83505,
         "minutes": 12.5,
     }
+
+
+class FakeRun:
+    """A W&B run that keeps its summary and closed state in memory."""
+
+    entity, project, id = "team", "compress-ecg", "abc123"
+
+    def __init__(self):
+        self.summary = {}
+        self.closed = False
+
+    def finish(self):
+        self.closed = True
+
+
+def fake_wandb(run: FakeRun):
+    """Return a stand-in wandb module whose public API is unreachable, as on an offline machine."""
+
+    class NoApi:
+        def __init__(self):
+            raise ConnectionError("The W&B server cannot be reached")
+
+    return types.SimpleNamespace(init=lambda **_: run, Api=NoApi)
+
+
+def test_offline_run_keeps_final_scores_without_the_server(monkeypatch, tmp_path):
+    run = FakeRun()
+    monkeypatch.setitem(sys.modules, "wandb", fake_wandb(run))
+    tracker = WandbRun(
+        project="compress-ecg", entity=None, name="student_distill_s42", group=None, mode="offline",
+        settings={"seed": 42}, directory=tmp_path / "wandb",
+    )
+
+    tracker.finish({"best_val_shd_auroc": 0.83})
+
+    assert run.summary == {"best_val_shd_auroc": 0.83}
+    assert run.closed
