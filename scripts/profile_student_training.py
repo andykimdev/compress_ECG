@@ -26,7 +26,7 @@ from torch.profiler import ProfilerActivity, profile, record_function
 
 from compress_ecg.data import EchoNextDataset
 from compress_ecg.distill import distillation_step, make_loaders
-from compress_ecg.predictions import LogitLookup, _code_version, load_run
+from compress_ecg.predictions import LogitLookup, load_run, run_manifest
 from compress_ecg.student import build_student
 from compress_ecg.timing import step_summary
 
@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None) -> None:
         "device": args.device,
         "gpu": torch.cuda.get_device_name(0) if args.device.startswith("cuda") else None,
         "cpu_count": os.cpu_count(), "python": platform.python_version(), "torch": torch.__version__,
-        "code": _code_version(), "rows": rows,
+        "code": run_manifest("student", train)["code"], "rows": rows,
     }
     (output / f"steps_{args.label}.json").write_text(json.dumps(record, indent=2) + "\n")
     table = profiler_table(

@@ -288,7 +288,7 @@ class EchoNextDataset(Dataset):
         if part is not None:
             self.indices = part_rows(self.metadata, part, holdout_fraction, holdout_seed)
         if patient_fraction != 1:
-            keys = self.metadata["patient_key"].to_numpy(dtype=str)[self.indices]
+            keys = self._patient_keys[self.indices]
             kept = kept_patients(keys, self.labels[self.indices, SHD_INDEX] == 1, patient_fraction, patient_seed)
             self.indices = self.indices[np.isin(keys, kept)]
         if limit is not None and limit < len(self.indices):
