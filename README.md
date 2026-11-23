@@ -1,6 +1,6 @@
 # compress_ECG
 
-**Master plan, last updated November 20, 2026.** This file replaces the plan in our original
+**Master plan, last updated November 23, 2026.** This file replaces the plan in our original
 [proposal](docs/proposal.pdf) wherever the two differ.
 
 We are shrinking a heart disease detection model so it can run on small devices, without making
@@ -48,8 +48,8 @@ Only the Teacher and the Student are trained by us.
 | EchoNext-Mini | Released small version, ResNet design | 1.05M | 82.0 published, 81.97 in our run | Baseline to compare against |
 | ECG-FM | Pretrained ECG foundation model | 90.9M | None yet | Starting point for the Teacher |
 | Teacher | ECG-FM plus a new output layer | 90.4M | 85.15 on Validation | Fine-tune it, and it must beat 82.0 |
-| Student | EchoNext-Mini design, made narrower | 0.10M | To measure | Train it by distillation |
-| Student FP16 and INT8 | Student stored in 16 or 8 bits | 0.10M | To measure | Quantize and deploy it |
+| Student | EchoNext-Mini design, made narrower | 0.10M | 83.04 on Validation | Train it by distillation |
+| Student FP16 and INT8 | Student stored in 16 or 8 bits | 0.10M | FP16 83.04 on Validation, INT8 to measure | Quantize and deploy it |
 
 AUROC is explained under [How we judge a model](#how-we-judge-a-model). The EchoNext score is the
 published one. For EchoNext-Mini, our run of the released weights on the Test ECGs gives 81.97,
@@ -92,12 +92,15 @@ A result only means something next to a simpler option, so we compare against th
   filled-in PR interval or atrial rate, and 3 voltage summaries for each of the 12 leads.
 
 The table gives SHD AUROC for each model so far. The files in
-[`results/baselines`](results/baselines) and [`results/teacher`](results/teacher) hold the scores
-for all 12 outputs.
+[`results/baselines`](results/baselines), [`results/teacher`](results/teacher), and
+[`results/student`](results/student) hold the scores for all 12 outputs. Each Student score is
+the mean over seeds 42 to 47, and the [Student results](results/student/README.md) give the spread.
 
 | Model | Validation | Test |
 |---|---|---|
 | Teacher | 85.15 | Not scored yet |
+| Student, copies the Teacher | 83.04 | Not scored yet |
+| Student, labels only | 82.62 | Not scored yet |
 | EchoNext-Mini | 81.48 | 81.97 |
 | Logistic regression | 77.29 | Not scored yet |
 | Gradient boosting | 74.43 | 76.15 |
@@ -192,7 +195,7 @@ with a note on what to do, and their docstrings give the exact inputs and output
 |---|---|---|---|
 | A: Data and baselines | `data.py`, `baseline.py`, `profiling.py` | `run_baseline.py`, `run_profile.py` | Baseline runs, fitted tabular checkpoint, profiling table |
 | B: Teacher | `teacher.py`, `sweep.py`, `runs.py` | `run_teacher.py`, `sweep_teacher.py`, `soup_teacher.py` | Teacher checkpoint and runs |
-| C: Student | `distill.py` | `run_student.py` | Student checkpoint and runs |
+| C: Student | `distill.py`, `tracking.py` | `run_student.py`, `time_student.py`, `profile_student_training.py` | Student checkpoint and runs |
 | D: Quantization | `quantize.py` | `run_quantize.py` | FP16 and INT8 models and runs |
 | E: Audit | `audit.py` | `run_audit.py` | Aggregate tables and figures |
 
@@ -203,6 +206,22 @@ already work, so change them only after telling the team.
 - **`data.py`:** Loads the ECGs. Each batch has `waveform`, `tabular`, `labels`, and `label_mask`.
 - **`predictions.py`:** Runs any model and saves or loads its prediction files.
 - **`student.py`:** Builds, saves, and loads the width 5 Student.
+
+The remaining modules support several roles.
+
+- **`compare.py`:** Compares two models scored on the same ECGs, with a paired bootstrap.
+- **`linear.py`:** Fits the logistic regression baseline, run by `run_linear.py`.
+- **`timing.py`:** Times a forward pass and summarizes training steps.
+- **`evaluation_log.py`:** Turns saved results into W&B summary runs, sent by `log_results_wandb.py`.
+
+The remaining scripts make tables, figures, and dashboards from saved results.
+
+- **Data summary:** `data_stats.py` writes the tables in `results/data_stats`, and `data_figures.py`
+  draws their figures.
+- **Teacher runs:** `collect_runs.py` rebuilds the run table, and `plot_runs.py` draws it.
+- **Paired gaps:** `compare_runs.py` compares any two saved runs.
+- **W&B:** `import_teacher_runs_wandb.py` copies the Teacher runs, and `log_results_wandb.py` logs
+  the evaluation summaries.
 
 ### The two shared formats
 
@@ -230,10 +249,11 @@ Every model saves the same four files with `predictions.write_run`, under
 Until a real input is ready, use the released EchoNext-Mini as a dummy, and keep its outputs under
 `runs/dummy/`. Dummy numbers only show that code works, so they never go in the report.
 
-- **Role C:** Train from EchoNext-Mini's saved predictions on the Training ECGs.
-- **Role D:** Run `run_quantize.py` without `--student`, which converts EchoNext-Mini. Once a
-  Student checkpoint exists, pass it with `--student`. Both `run_student.py` and notebook 03 save
-  it as `best_student.pt`, in the format `student.load_student` reads.
+- **Role C:** Done. The stand-in runs that copied EchoNext-Mini are in
+  [`results/student/stand_in`](results/student/stand_in).
+- **Role D:** Pass a Student checkpoint to `run_quantize.py` with `--student`. Both
+  `run_student.py` and notebook 03 save it as `best_student.pt`, in the format
+  `student.load_student` reads.
 - **Role E:** Build the scorecard on EchoNext-Mini's saved predictions.
 
 `tests/test_pipeline.py` runs every handoff on synthetic ECGs. When your code is ready, replace
@@ -251,7 +271,13 @@ your role's stand-in in that test with the real call.
 - **Done:** A logistic regression baseline scores 77.29 SHD AUROC on Validation.
 - **Done:** The Teacher is fine-tuned and scores 85.15 SHD AUROC on Validation. The
   [Teacher guide](docs/teacher.md) covers how to download it and make its predictions.
-- **Next:** Train the Student from the Teacher's predictions on the Training ECGs.
+- **Done:** The Student copies the Teacher and scores 83.04 SHD AUROC on Validation, the mean of 6
+  seeds. A labels-only control scores 82.62. The [Student results](results/student/README.md) give
+  the spread and the training speed.
+- **Done:** The FP16 Student keeps the same 83.04 and halves the weights, from 423,352 to 211,820
+  bytes.
+- **Next:** INT8 post-training and quant-aware conversion, then the subgroup and calibration audit.
+- **Next:** Score every model on Test once, at the end.
 - **Not decided yet:** The one deployment device for steps 4 and 5.
 
 ## The data
@@ -357,8 +383,14 @@ For Role C experiments, open
 It starts with a two-epoch Mini stand-in run, caches Mini predictions, plots learning
 curves, and compares validation metrics. Dataset limits and training settings are
 configured in notebook cells. The loss and training loop remain in `src/`.
-Notebook number 02 is reserved for Teacher training. Set the Teacher source and
-saved-run paths in notebook 03 when the real Teacher is ready.
+Notebook number 02 is reserved for Teacher training. The real Student runs use the
+command line instead, with one config per setting and one output folder per seed, so a seed
+never overwrites another seed's checkpoint.
+
+```bash
+python scripts/run_student.py --config configs/student_distill.json --seed 42 --device cuda \
+  --output-dir checkpoints/student/student_distill_s42
+```
 
 ## Repository layout
 

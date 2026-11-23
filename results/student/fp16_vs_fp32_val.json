@@ -1,0 +1,78 @@
+{
+  "description": "FP32 against FP16 for the 6 Students that copied the Teacher, on the 4,626 Validation ECGs",
+  "made_by": "scripts/run_quantize.py on each runs/student_distill_s<seed> folder, then a comparison of the two metrics.json and predictions.npz files on the lab server",
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition (GPUs 2 and 3)",
+  "parameters": 104436,
+  "weight_and_buffer_bytes": {
+    "fp32": 423352,
+    "fp16": 211820
+  },
+  "columns": {
+    "shd32/shd16": "SHD AUROC",
+    "mean32/mean16": "mean AUROC of 12 outputs",
+    "brier32/brier16": "SHD Brier score",
+    "max_prob_diff": "largest absolute change in any predicted probability"
+  },
+  "rows": [
+    {
+      "seed": 42,
+      "shd32": 0.828597082529491,
+      "shd16": 0.828599179509078,
+      "mean32": 0.803828888960237,
+      "mean16": 0.8038325543391783,
+      "brier32": 0.16622716257695114,
+      "brier16": 0.16621981550086998,
+      "max_prob_diff": 0.0019012689590454102
+    },
+    {
+      "seed": 43,
+      "shd32": 0.8308168307394331,
+      "shd16": 0.8308214059676227,
+      "mean32": 0.8037934873655793,
+      "mean16": 0.8037950137702229,
+      "brier32": 0.16718014235065531,
+      "brier16": 0.16715884895080974,
+      "max_prob_diff": 0.002200782299041748
+    },
+    {
+      "seed": 44,
+      "shd32": 0.8292852731029958,
+      "shd16": 0.8292767898673945,
+      "mean32": 0.801595146601301,
+      "mean16": 0.8016007042534092,
+      "brier32": 0.1708164612311983,
+      "brier16": 0.17083345512257828,
+      "max_prob_diff": 0.00137251615524292
+    },
+    {
+      "seed": 45,
+      "shd32": 0.8328116302300577,
+      "shd16": 0.8328135365751367,
+      "mean32": 0.807830624623453,
+      "mean16": 0.8078356529655839,
+      "brier32": 0.1640602781289173,
+      "brier16": 0.16405634680989678,
+      "max_prob_diff": 0.002257317304611206
+    },
+    {
+      "seed": 46,
+      "shd32": 0.8327774113358904,
+      "shd16": 0.8327778879221601,
+      "mean32": 0.8083981659447385,
+      "mean16": 0.8084087166036589,
+      "brier32": 0.1642596832698707,
+      "brier16": 0.16426927207423203,
+      "max_prob_diff": 0.0027664899826049805
+    },
+    {
+      "seed": 47,
+      "shd32": 0.8283286691423735,
+      "shd16": 0.8283341975431024,
+      "mean32": 0.8064737726906627,
+      "mean16": 0.8064751233669506,
+      "brier32": 0.16670365884025634,
+      "brier16": 0.1667089486406098,
+      "max_prob_diff": 0.0027032196521759033
+    }
+  ]
+}

@@ -280,12 +280,15 @@ class EchoNextDataset(Dataset):
         if np.isnan(labels[:, SHD_INDEX]).any():
             raise ValueError("Composite SHD labels must not be missing")
         self.label_mask = np.isfinite(labels)
+        # Plain arrays, because a pandas row lookup per ECG costs more than reading the ECG.
+        self._row_ids = self.metadata["row_id"].to_numpy(dtype=np.int64)
+        self._patient_keys = self.metadata["patient_key"].to_numpy(dtype=str)
         self.labels = np.nan_to_num(labels, nan=0.0)
         self.indices = np.arange(count)
         if part is not None:
             self.indices = part_rows(self.metadata, part, holdout_fraction, holdout_seed)
         if patient_fraction != 1:
-            keys = self.metadata["patient_key"].to_numpy(dtype=str)[self.indices]
+            keys = self._patient_keys[self.indices]
             kept = kept_patients(keys, self.labels[self.indices, SHD_INDEX] == 1, patient_fraction, patient_seed)
             self.indices = self.indices[np.isin(keys, kept)]
         if limit is not None and limit < len(self.indices):
@@ -315,14 +318,13 @@ class EchoNextDataset(Dataset):
         tabular = np.array(self._tabular[row], dtype=np.float32, copy=True)
         if not np.isfinite(tabular).all():
             raise ValueError(f"Non-finite input in tabular features at {self.split} split row {row}")
-        record = self.metadata.iloc[row]
         sample = {
             "tabular": torch.from_numpy(tabular),
             "labels": torch.from_numpy(self.labels[row].copy()),
             "label_mask": torch.from_numpy(self.label_mask[row].copy()),
-            "row_id": int(record["row_id"]),
+            "row_id": int(self._row_ids[row]),
             "split_row": row,
-            "patient_key": str(record["patient_key"]),
+            "patient_key": str(self._patient_keys[row]),
         }
         if self._waveforms is not None:
             waveform = np.array(self._waveforms[row, 0].T, dtype=np.float32, copy=True)

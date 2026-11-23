@@ -1,0 +1,53 @@
+{
+  "label": "before",
+  "workload": "Student training steps (forward, distillation loss, backward, AdamW) on Training ECGs",
+  "timed": "wait = time to receive the next batch from the loader; compute = copy to device through the optimizer step, ending with a device synchronize",
+  "train_ecgs": 72475,
+  "batch_size": 32,
+  "precision": "fp32",
+  "warmup_steps": 30,
+  "timed_steps": 300,
+  "seed": 42,
+  "same_batches_for_every_worker_count": true,
+  "device": "cuda",
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "cpu_count": 384,
+  "python": "3.10.22",
+  "torch": "2.14.1+cu130",
+  "code": {
+    "commit": null,
+    "dirty": null
+  },
+  "rows": [
+    {
+      "num_workers": 0,
+      "batch_size": 32,
+      "steps": 300,
+      "median_wait_ms": 4.343270091339946,
+      "median_compute_ms": 12.919220607727766,
+      "wait_share": 0.2469543748567722,
+      "ecgs_per_second": 1792.863178427933,
+      "epoch_minutes_estimate": 0.6737361117125652
+    },
+    {
+      "num_workers": 4,
+      "batch_size": 32,
+      "steps": 300,
+      "median_wait_ms": 2.2530900314450264,
+      "median_compute_ms": 13.251335360109806,
+      "wait_share": 0.14997449084139935,
+      "ecgs_per_second": 2009.5473309657457,
+      "epoch_minutes_estimate": 0.6010889358282333
+    },
+    {
+      "num_workers": 8,
+      "batch_size": 32,
+      "steps": 300,
+      "median_wait_ms": 2.2884251084178686,
+      "median_compute_ms": 13.210589997470379,
+      "wait_share": 0.14480199986037784,
+      "ecgs_per_second": 1957.7737544034776,
+      "epoch_minutes_estimate": 0.6169848093784013
+    }
+  ]
+}

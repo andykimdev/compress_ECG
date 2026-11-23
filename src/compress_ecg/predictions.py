@@ -369,6 +369,28 @@ def load_predictions_and_metadata(output_dir: str | Path) -> tuple[dict[str, np.
     return run.arrays, run.metadata
 
 
+class LogitLookup:
+    """A run's saved logits, sorted once by row_id, so each batch lookup is a binary search."""
+
+    def __init__(self, run: PredictionRun):
+        order = np.argsort(run.arrays["row_id"])
+        self.sorted_ids = run.arrays["row_id"][order]
+        self.sorted_logits = run.arrays["logits"][order]
+
+    def __call__(self, row_ids: np.ndarray | torch.Tensor) -> torch.Tensor:
+        """
+        Return the saved logits [batch, 12] in the order of row_ids, which may be shuffled.
+
+        Raises:
+            ValueError: When the run has no prediction for one of the rows.
+        """
+        wanted = np.asarray(row_ids)
+        positions = np.searchsorted(self.sorted_ids, wanted).clip(max=len(self.sorted_ids) - 1)
+        if not np.array_equal(self.sorted_ids[positions], wanted):
+            raise ValueError("The saved run has no prediction for at least one row in this batch")
+        return torch.from_numpy(self.sorted_logits[positions])
+
+
 def aligned_logits(run: PredictionRun, row_ids: np.ndarray | torch.Tensor) -> torch.Tensor:
     """
     Look up saved logits for a batch, which may be shuffled.
@@ -382,13 +404,10 @@ def aligned_logits(run: PredictionRun, row_ids: np.ndarray | torch.Tensor) -> to
 
     Raises:
         ValueError: When the run has no prediction for one of the rows.
+
+    Notes:
+        This sorts the run on every call. For many batches, build one LogitLookup instead.
     """
-    wanted = np.asarray(row_ids)
-    order = np.argsort(run.arrays["row_id"])
-    sorted_ids = run.arrays["row_id"][order]
-    positions = np.searchsorted(sorted_ids, wanted).clip(max=len(sorted_ids) - 1)
-    if not np.array_equal(sorted_ids[positions], wanted):
-        raise ValueError("The saved run has no prediction for at least one row in this batch")
-    return torch.from_numpy(run.arrays["logits"][order[positions]])
+    return LogitLookup(run)(row_ids)
 
 

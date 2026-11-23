@@ -191,3 +191,27 @@ def test_scoring_many_batches_with_workers_stays_under_the_open_file_limit():
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=300)
     assert result.returncode == 0, result.stderr[-400:]
     assert result.stdout.strip() == "(600, 12)"
+
+
+def test_logit_lookup_follows_shuffled_batch_order_across_calls(data_dir, tmp_path):
+    from compress_ecg.predictions import LogitLookup
+
+    dataset = EchoNextDataset(data_dir, "val")
+    run = load_run(write_run(RowDependent(), "teacher", dataset, runs_root=tmp_path))
+    lookup = LogitLookup(run)
+
+    first = lookup(torch.tensor([14, 2, 22]))
+    second = lookup(torch.tensor([6, 18]))
+
+    np.testing.assert_array_equal(first.numpy(), run.arrays["logits"][[3, 0, 5]])
+    np.testing.assert_array_equal(second.numpy(), run.arrays["logits"][[1, 4]])
+
+
+@pytest.mark.parametrize("rows", [[3], [999], [2, 3]])
+def test_logit_lookup_rejects_rows_without_predictions(data_dir, tmp_path, rows):
+    from compress_ecg.predictions import LogitLookup
+
+    dataset = EchoNextDataset(data_dir, "val")
+    lookup = LogitLookup(load_run(write_run(RowDependent(), "teacher", dataset, runs_root=tmp_path)))
+    with pytest.raises(ValueError, match="no prediction"):
+        lookup(np.array(rows))
