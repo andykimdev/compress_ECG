@@ -384,10 +384,12 @@ It starts with a two-epoch Mini stand-in run, caches Mini predictions, plots lea
 curves, and compares validation metrics. Dataset limits and training settings are
 configured in notebook cells. The loss and training loop remain in `src/`.
 Notebook number 02 is reserved for Teacher training. The real Student runs use the
-command line instead, with one config per setting.
+command line instead, with one config per setting and one output folder per seed, so a seed
+never overwrites another seed's checkpoint.
 
 ```bash
-python scripts/run_student.py --config configs/student_distill.json --seed 42 --device cuda
+python scripts/run_student.py --config configs/student_distill.json --seed 42 --device cuda \
+  --output-dir checkpoints/student/student_distill_s42
 ```
 
 ## Repository layout
